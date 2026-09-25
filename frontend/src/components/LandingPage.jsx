@@ -1,602 +1,823 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   Play, Shield, Cpu, Activity, MapPin, 
   Layers, Waves, FileText, ArrowRight, 
   CheckCircle2, ChevronRight, Terminal, Compass, Zap,
-  ArrowDown, Radio
+  Radio, Sliders, Disc, HardDrive, RefreshCw, X, AlertTriangle,
+  Settings, Power, Crosshair, Volume2, Database, Eye, Gauge, Lock
 } from 'lucide-react';
-import { CLASS_COLORS } from '../services/colors';
-import { fetchSampleImageBlob } from '../services/api';
+import { soundFx } from '../services/sound';
 
-const PIPELINE_STAGES = [
-  {
-    id: 'ingestion',
-    number: '01',
-    name: 'Image & Telemetry Ingestion',
-    shortName: 'INGESTION',
-    tag: 'I/O & SENSOR BUS',
-    summary: 'Ingests raw 8/16-bit GeoTIFF, PNG, JPG SSS records paired with real-time NMEA vessel telemetry.',
-    technicalDetails: 'Accepts side-scan sonar waterfall lines and forward-looking matrices alongside WGS84 GPS latitude/longitude, gyro compass heading (0-360° True), towfish acoustic altitude, and calibrated swath range.',
-    algorithm: 'NMEA-0183 & GeoTIFF Parser',
-    module: 'backend/app/api/routes_analysis.py'
-  },
-  {
-    id: 'preprocessing',
-    number: '02',
-    name: 'Bilateral Despeckling + CLAHE',
-    shortName: 'PREPROCESSING',
-    tag: 'SIGNAL CONDITIONING',
-    summary: 'Non-linear bilateral filter removes Rayleigh acoustic speckle noise while preserving sharp object boundaries.',
-    technicalDetails: 'Contrast Limited Adaptive Histogram Equalization (CLAHE) normalizes severe acoustic beam attenuation across lateral swath ranges, avoiding the boundary-blurring artifacts of standard Gaussian filters.',
-    algorithm: 'Bilateral Filter (d=9, σ_color=75, σ_space=75) + CLAHE (clipLimit=2.5, grid=8x8)',
-    module: 'backend/app/services/preprocessing.py'
-  },
-  {
-    id: 'detector',
-    number: '03',
-    name: 'YOLOv8-Nano Feature Proposal',
-    shortName: 'YOLOv8-NANO',
-    tag: 'NEURAL INFERENCE',
-    summary: 'Ultra-lightweight edge neural network proposes candidate regions of interest across 5 marine target classes.',
-    technicalDetails: 'Detects ghost_net (entanglement hazards), cylinder (discarded drums), pipe (exposed seabed pipelines), wreckage (sunken hull obstacles), and unknown_anomaly. Runs at ~15ms inference latency for embedded AUV integration.',
-    algorithm: 'YOLOv8-Nano (PyTorch / ONNX Engine with Acoustic Feature Extraction Fallback)',
-    module: 'backend/app/services/detector.py'
-  },
-  {
-    id: 'physics_filter',
-    number: '04',
-    name: 'Physics-Informed Acoustic Filter',
-    shortName: 'PHYSICS FILTER',
-    tag: 'HEURISTIC VERIFICATION',
-    summary: 'Enforces look-direction shadow ray tracing to confirm physical 3D seabed elevation and eliminate false positives.',
-    technicalDetails: 'Real underwater debris casts an acoustic shadow away from the towfish nadir track. The engine validates ensonified highlight intensity (μ_h > 140) and shadow base occlusion (μ_s < 45), computing contrast ratio Δ = μ_h / max(1, μ_s).',
-    algorithm: 'Rayleigh Shadow Projection & Lateral Intensity Profiling',
-    module: 'backend/app/services/acoustic_filter.py'
-  },
-  {
-    id: 'fusion_scoring',
-    number: '05',
-    name: 'Multi-Factor Hazard Scoring',
-    shortName: 'FUSION SCORING',
-    tag: 'DECISION ENGINE',
-    summary: 'Blends deep learning confidence with physics shadow confirmation into a unified hazard rating.',
-    technicalDetails: 'Final Hazard Score = 0.65 × Confidence_YOLO + 0.35 × Score_Physics. Automatically categorizes detections into CRITICAL, HIGH, MEDIUM, and LOW operational hazard severity levels.',
-    algorithm: 'Blended Heuristic-Neural Fusion: S_final = 0.65(S_ai) + 0.35(S_phy)',
-    module: 'backend/app/services/acoustic_filter.py'
-  },
-  {
-    id: 'geolocation',
-    number: '06',
-    name: 'WGS84 Geolocation Engine',
-    shortName: 'WGS84 ENGINE',
-    tag: 'GEOSPATIAL TRIGONOMETRY',
-    summary: 'Converts pixel swath indices into precise geodetic WGS84 coordinates using altitude and heading matrices.',
-    technicalDetails: 'Calculates cross-track ground range via Pythagoras slant-range compensation: y_g = sqrt(R_slant^2 - h_alt^2). Applies vessel heading rotation matrix to compute exact target Latitude and Longitude offsets in decimal degrees.',
-    algorithm: 'WGS84 Great-Circle Trigonometry + 2D Rotation Matrix R(θ)',
-    module: 'backend/app/services/geolocation.py'
-  },
-  {
-    id: 'maritime_gis',
-    number: '07',
-    name: 'Maritime GIS & Swath Visualizer',
-    shortName: 'MARITIME GIS',
-    tag: 'OPERATOR CONSOLE',
-    summary: 'Interactive waterfall display with lateral metric scale, 15m depth ruler, and nautical chart overlays.',
-    technicalDetails: 'Provides real-time cross-track cursor inspection, multi-palette false-color rendering (Copper, Marine, Grayscale, Inverted), and CartoDB maritime GIS nautical charting.',
-    algorithm: 'Leaflet Nautical Layer + Canvas Dynamic Hydrographic Waterfall',
-    module: 'frontend/src/components/MaritimeMap.jsx & SonarViewer.jsx'
-  },
-  {
-    id: 'dossier_export',
-    number: '08',
-    name: 'Mission Dossier Export',
-    shortName: 'REPORT EXPORT',
-    tag: 'ARCHIVAL & COMPLIANCE',
-    summary: 'Exports complete hydrographic survey dossiers in JSON, CSV (Excel), and GIS GeoJSON formats.',
-    technicalDetails: 'Generates standardized survey reports containing mission IDs, sensor parameters, classified target inventories, individual physics metrics, and georeferenced bounding boxes compliant with MoES/NIOT standards.',
-    algorithm: 'RFC-7946 GeoJSON FeatureCollection & RFC-4180 CSV Serializer',
-    module: 'backend/app/services/reporting.py'
-  }
-];
+// Helper component for physical hex screw heads on metal plates
+function HexScrew({ className = '' }) {
+  return <div className={`hex-screw ${className}`} title="Tactile Hex Screw Anchor" />;
+}
 
-const EVALUATOR_STEPS = [
-  {
-    step: '01',
-    title: 'Launch Live Operator Console',
-    desc: 'Click "Launch Live Sonar Analysis" to initialize the hydrographic inspection dashboard and connect to the FastAPI backend telemetry bus.'
-  },
-  {
-    step: '02',
-    title: 'Select Standardized Survey Transect',
-    desc: 'Choose one of 4 calibrated MoES benchmarks: Bay of Bengal (Ghost Net), Palk Strait (Wreckage), Arabian Sea (Pipeline), or Visakhapatnam (Cylinder).'
-  },
-  {
-    step: '03',
-    title: 'Execute Acoustic Analysis Pipeline',
-    desc: 'Click "RUN SONAR ANALYSIS" to run the full Bilateral + CLAHE + YOLOv8 + Acoustic Shadow + Geolocation pipeline (~18ms latency).'
-  },
-  {
-    step: '04',
-    title: 'Inspect Physics Verification & ROI Crop',
-    desc: 'Examine the annotated ROI thumbnail marking Highlight Peak and Shadow Base intensities along with the 0.65×(AI) + 0.35×(Physics) score fusion.'
-  },
-  {
-    step: '05',
-    title: 'Validate WGS84 Coordinates on GIS Map',
-    desc: 'Review the vessel track and target pins on the interactive nautical chart to verify cross-track offset and slant-range calculations.'
-  },
-  {
-    step: '06',
-    title: 'Export Standardized Mission Dossier',
-    desc: 'Click "EXPORT REPORT" in the top bar to inspect or download the survey results in structured JSON, CSV spreadsheet, or GIS GeoJSON.'
-  }
-];
+// Helper component for recessed status LEDs
+function LedLight({ state = 'off', label = '' }) {
+  const ledClass = 
+    state === 'orange' ? 'led-orange-on' : 
+    state === 'amber' ? 'led-amber-on' : 
+    'led-off';
+  return (
+    <div className="flex items-center gap-2">
+      <span className={`led-indicator ${ledClass}`} />
+      {label && <span className="text-[11px] font-mono font-bold tracking-wider text-slate-300 uppercase">{label}</span>}
+    </div>
+  );
+}
 
-const TICKER_ITEMS = [
-  '5 DETECTION CLASSES',
-  'SUB-20MS PIPELINE LATENCY',
-  'WGS84 GEOREFERENCING',
-  'PHYSICS-VERIFIED SHADOW ANALYSIS',
-  'ZERO CLOUD DEPENDENCY',
-  'BILATERAL SPECKLE FILTERING',
-  'CLAHE BEAM NORMALIZATION',
-  'MOES / NIOT COMPLIANT'
-];
+export default function LandingPage({ onLaunchDashboard, presets = [], onSelectPresetAndLaunch }) {
+  // Console state management
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const [isFileModalOpen, setIsFileModalOpen] = useState(false);
+  const [fileProgress, setFileProgress] = useState(0);
+  const [isCassetteLoading, setIsCassetteLoading] = useState(false);
+  
+  // Interactive Rack States
+  const [filterKnobAngle, setFilterKnobAngle] = useState(45);
+  const [segmentationModel, setSegmentationModel] = useState('yolov8'); // 'yolov8' | 'unet'
+  const [isLogPaused, setIsLogPaused] = useState(false);
+  
+  // Wipe Slider Lever (0 to 100%)
+  const [wipePosition, setWipePosition] = useState(50);
+  const isDraggingWipe = useRef(false);
 
-export default function LandingPage({ onLaunchDashboard, presets, onSelectPresetAndLaunch }) {
-  const [selectedStage, setSelectedStage] = useState(PIPELINE_STAGES[0]);
-  const [heroSonarUrl, setHeroSonarUrl] = useState('');
+  // Terminal log items
+  const [terminalLogs, setTerminalLogs] = useState([
+    '[SYS_INIT] 1990s Acoustic Terminal v4.2 Online...',
+    '[NMEA_BUS] Lat: 13.0827°N Lon: 80.2707°E Alt: 18.2m Heading: 085.4°',
+    '[SONAR_INGEST] Side-Scan Stream Active (500kHz High Frequency)',
+    '[FILTER_DSP] CLAHE Normalization Active • ClipLimit=2.5',
+    '[DETECTOR_CORE] YOLOv8-seg Proposed Candidate Region #01',
+    '[PHYSICS_SHADOW] Highlight intensity: 192 | Shadow Base: 14 | Δ: 13.7x',
+    '[GEO_TAG] WGS84 Geolocation Verified: Object #104 [GHOST_NET]',
+  ]);
 
+  // Handle auto-scrolling terminal logs unless paused
   useEffect(() => {
-    // Attempt to load the realistic sample sonar image for the hero visual
-    const loadHeroImage = async () => {
-      try {
-        const blob = await fetchSampleImageBlob('demo_cylinder.png');
-        setHeroSonarUrl(URL.createObjectURL(blob));
-      } catch (err) {
-        console.warn('Could not load sample sonar image, using procedural fallback:', err);
-      }
-    };
-    loadHeroImage();
-  }, []);
+    if (isLogPaused) return;
+    const interval = setInterval(() => {
+      const timestamp = new Date().toISOString().substring(11, 19);
+      const sampleMessages = [
+        `[${timestamp}] [DSP_PING] Swath Sweep +48.2m Stbd • SNR: 24.1dB`,
+        `[${timestamp}] [DEBRIS_SCAN] Candidate ROI Detected • Confidence 89%`,
+        `[${timestamp}] [SHADOW_PROJECT] Raytrace Verified Base Depth: 1.8m`,
+        `[${timestamp}] [NMEA_UPDATE] Hydrographic Towfish Speed: 3.2 knots`,
+        `[${timestamp}] [CLASSIFIER] Target match: DISCARDED_CYLINDER_DRUM`,
+      ];
+      const randomMsg = sampleMessages[Math.floor(Math.random() * sampleMessages.length)];
+      setTerminalLogs(prev => [...prev.slice(-12), randomMsg]);
+    }, 2800);
+    return () => clearInterval(interval);
+  }, [isLogPaused]);
 
-  const scrollToPipeline = () => {
-    document.getElementById('pipeline-section')?.scrollIntoView({ behavior: 'smooth' });
+  // Handle cassette deck loading simulation
+  const triggerFloppyLoad = () => {
+    soundFx.playClick();
+    setIsFileModalOpen(true);
+    setIsCassetteLoading(true);
+    setFileProgress(0);
+
+    let current = 0;
+    const timer = setInterval(() => {
+      current += 10;
+      setFileProgress(current);
+      soundFx.playBeep();
+      if (current >= 100) {
+        clearInterval(timer);
+        setIsCassetteLoading(false);
+      }
+    }, 220);
+  };
+
+  // Knob interaction
+  const rotateFilterKnob = () => {
+    soundFx.playClick();
+    setFilterKnobAngle(prev => (prev + 45) % 360);
+  };
+
+  // Model Toggle
+  const toggleModel = () => {
+    soundFx.playToggle();
+    setSegmentationModel(prev => (prev === 'yolov8' ? 'unet' : 'yolov8'));
   };
 
   return (
-    <div className="min-h-screen bg-[#141414] text-[#E0E0E0] font-sans selection:bg-[#c98a4b] selection:text-[#141414]">
-      {/* 1. Sparse Portfolio Top Navigation */}
-      <header className="bg-[#141414] border-b border-white/08 px-6 lg:px-12 py-4 sticky top-0 z-50">
-        <div className="max-w-7xl mx-auto flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center justify-center w-8 h-8 rounded-[2px] bg-[#1f1f1f] border border-white/10 text-[#c98a4b]">
-              <Radio className="w-4 h-4" />
-            </div>
-            <div className="flex items-center gap-2.5">
-              <span className="font-extrabold text-[16px] tracking-wider text-white font-mono leading-none">
-                SONARSENTINEL
-              </span>
-              <span className="text-[11px] font-mono font-semibold px-2 py-0.5 rounded-[2px] bg-[#1f1f1f] text-slate-400 border border-white/10">
-                SIH26057 • MoES
-              </span>
-            </div>
+    <div className="min-h-screen bg-[#14171d] text-[#E2E8F0] font-mono selection:bg-[#FF6600] selection:text-[#0A0C0F] p-3 md:p-6 space-y-6">
+      
+      {/* ===================================================================
+          1. HEADER & CONTROL PANEL BAR
+          =================================================================== */}
+      <header className="skeuo-chassis p-3 md:p-4 flex flex-col md:flex-row items-center justify-between gap-4">
+        {/* Top Left: Stenciled Industrial Label */}
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="skeuo-inset px-3 py-1.5 flex items-center gap-2 border border-[#3A4150]">
+            <Radio className="w-4 h-4 text-[#FF6600] animate-pulse" />
+            <span className="text-[13px] font-black tracking-widest text-[#E2E8F0]">
+              SYSTEM LOG: SIH-26057 // MoES
+            </span>
           </div>
+          <span className="text-[10px] text-slate-400 hidden lg:inline">
+            [TACTICAL HYDROGRAPHIC SUBMARINE CONSOLE]
+          </span>
+        </div>
+
+        {/* Center: Recessed LED Status Lights */}
+        <div className="skeuo-inset px-4 py-2 flex items-center gap-6 border border-[#2D323E]">
+          <LedLight state="orange" label="POWER" />
+          <div className="h-4 w-[1px] bg-[#2A2F3B]" />
+          <LedLight state="amber" label="ACOUSTIC STREAM READY" />
+          <div className="h-4 w-[1px] bg-[#2A2F3B]" />
+          <LedLight state="off" label="ERROR" />
+        </div>
+
+        {/* Top Right: Diagnostics Switch & Console Launch */}
+        <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+          <button
+            onClick={() => {
+              soundFx.playToggle();
+              setIsDiagnosticsOpen(!isDiagnosticsOpen);
+            }}
+            className="skeuo-btn text-[11px] px-3 py-1.5 uppercase flex items-center gap-2"
+            title="Toggle Mechanical Diagnostics Panel"
+          >
+            <Settings className={`w-3.5 h-3.5 ${isDiagnosticsOpen ? 'text-[#FF6600] rotate-45' : 'text-slate-400'} transition-transform`} />
+            <span>SYS DIAGNOSTICS</span>
+          </button>
 
           <button
-            onClick={onLaunchDashboard}
-            className="flex items-center gap-2 px-4 py-2 rounded-[2px] bg-[#c98a4b] hover:bg-[#b87d40] text-[#080d16] font-mono text-[12.5px] font-bold tracking-wider uppercase border border-[#96632f] transition-colors cursor-pointer"
+            onClick={() => {
+              soundFx.playClick();
+              onLaunchDashboard();
+            }}
+            className="skeuo-btn-orange text-[12px] px-4 py-2 uppercase flex items-center gap-2"
           >
-            <Play className="w-3.5 h-3.5 fill-current text-[#080d16]" />
-            <span>LAUNCH LIVE SONAR ANALYSIS</span>
+            <Play className="w-3.5 h-3.5 fill-current" />
+            <span>ENTER LIVE CONSOLE</span>
           </button>
         </div>
       </header>
 
-      {/* 2. Hero Section with Generous Negative Space & Dramatic Headline */}
-      <section className="relative px-6 lg:px-12 pt-16 lg:pt-24 pb-16 lg:pb-24 border-b border-white/08 overflow-hidden">
-        <div className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-12 items-center text-left">
+      {/* DIAGNOSTICS EXTENDED DRAWER */}
+      {isDiagnosticsOpen && (
+        <div className="skeuo-panel p-4 border-2 border-[#FF6600] animate-fadeIn space-y-3">
+          <div className="flex items-center justify-between border-b border-[#3A4150] pb-2">
+            <span className="text-[#FF6600] font-extrabold text-[13px] tracking-wider flex items-center gap-2">
+              <Activity className="w-4 h-4" />
+              HARDWARE DIAGNOSTIC TELEMETRY BUS (SUB-20MS EDGE CORE)
+            </span>
+            <button onClick={() => setIsDiagnosticsOpen(false)} className="text-slate-400 hover:text-white">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-[11px]">
+            <div className="skeuo-inset p-2.5 space-y-1">
+              <span className="text-slate-400 block">ACOUSTIC SAMPLING RATE:</span>
+              <span className="text-[#FF6600] font-extrabold text-[13px]">500 kHz SSS Waterfall</span>
+            </div>
+            <div className="skeuo-inset p-2.5 space-y-1">
+              <span className="text-slate-400 block">PIPELINE LATENCY:</span>
+              <span className="text-amber-400 font-extrabold text-[13px]">17.4 ms (Zero-Cloud)</span>
+            </div>
+            <div className="skeuo-inset p-2.5 space-y-1">
+              <span className="text-slate-400 block">WGS84 PRECISION:</span>
+              <span className="text-emerald-400 font-extrabold text-[13px]">Sub-meter Swath Trigonometry</span>
+            </div>
+            <div className="skeuo-inset p-2.5 space-y-1">
+              <span className="text-slate-400 block">PHYSICS VERIFICATION:</span>
+              <span className="text-[#FF6600] font-extrabold text-[13px]">Rayleigh Shadow Ray Tracer</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================================================================
+          2. HERO SECTION & CRT SONAR SCOPE
+          =================================================================== */}
+      <section className="skeuo-chassis p-5 md:p-8 grid grid-cols-1 lg:grid-cols-12 gap-8 items-center relative overflow-hidden">
+        
+        {/* Left Column: Monospace Stencil Headline & Tactile Buttons */}
+        <div className="lg:col-span-7 space-y-6 text-left">
           
-          {/* Left Column: Eyebrow + Dramatic Left-Aligned 90-110px Headline + Subtext */}
-          <div className="lg:col-span-7 space-y-6">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-[2px] bg-[#1f1f1f] text-[#c98a4b] border border-[#c98a4b]/40 uppercase tracking-wider">
-                PROBLEM STATEMENT SIH26057
+          <div className="inline-flex items-center gap-2 skeuo-plaque px-3 py-1 text-[11px] font-extrabold">
+            <Shield className="w-3.5 h-3.5 text-[#FF6600]" />
+            <span>MoES PROBLEM STATEMENT SIH-26057</span>
+          </div>
+
+          {/* Heavy Stencil Monospace Headline */}
+          <h1 className="text-3xl sm:text-5xl lg:text-6xl font-black tracking-tight text-white leading-none uppercase">
+            AUTOMATED ACOUSTIC <br />
+            <span className="orange-crt-glow text-[#FF6600]">DEBRIS DETECTION</span> <br />
+            CONSOLE
+          </h1>
+
+          {/* 2-Liner Solution */}
+          <p className="text-[14px] md:text-[15px] font-mono text-slate-300 max-w-2xl leading-relaxed border-l-4 border-[#FF6600] pl-4 bg-[#181B22]/70 py-2">
+            Processing noisy side-scan sonar feeds into real-time geospatial intelligence via low-level acoustic signal filtering and automated geo-tagging.
+          </p>
+
+          {/* Physical Controls Row */}
+          <div className="flex flex-wrap items-center gap-4 pt-2">
+            <button
+              onClick={() => {
+                soundFx.playClick();
+                onLaunchDashboard();
+              }}
+              className="skeuo-btn-orange text-[13px] px-6 py-3.5 flex items-center gap-3 uppercase"
+            >
+              <Zap className="w-4 h-4 fill-current text-[#0A0C0F]" />
+              <span>INITIATE SCANNER DEMO</span>
+            </button>
+
+            <button
+              onClick={triggerFloppyLoad}
+              className="skeuo-btn text-[12px] px-5 py-3 flex items-center gap-2 uppercase"
+            >
+              <HardDrive className="w-4 h-4 text-[#FF6600]" />
+              <span>LOAD SAMPLE LOGS</span>
+            </button>
+          </div>
+
+          {/* Metric Status Badges */}
+          <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-400 pt-1">
+            <span className="skeuo-inset px-2.5 py-1 border border-[#343A47]">
+              CLASS: <strong className="text-white">GHOST NET, CYLINDER, WRECKAGE</strong>
+            </span>
+            <span className="skeuo-inset px-2.5 py-1 border border-[#343A47]">
+              SPECKLE NOISE: <strong className="text-[#FF6600]">BILATERAL + CLAHE</strong>
+            </span>
+          </div>
+        </div>
+
+        {/* Right Column: 1990s CRT Monitor Frame with Revolving Sonar Scope */}
+        <div className="lg:col-span-5 relative flex justify-center">
+          <div className="crt-frame w-full max-w-md crt-scanlines p-3">
+            
+            {/* Monitor Header Readout */}
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[#282C36] text-[10px] orange-crt-glow">
+              <span className="flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-[#FF6600] animate-ping" />
+                RADAR SCOPE 500kHz SSS
               </span>
-              <span className="text-[11px] font-mono font-medium text-slate-400">
-                Ministry of Earth Sciences
-              </span>
+              <span>SWATH: 100m • NADIR</span>
             </div>
 
-            {/* Massive Portfolio Headline: 2-3 Lines */}
-            <h1 className="text-[48px] sm:text-[72px] lg:text-[96px] xl:text-[104px] font-mono font-black text-white leading-[0.94] tracking-tight">
-              Automated<br />
-              Underwater<br />
-              <span className="text-[#c98a4b]">Debris & Anomaly</span><br />
-              Detection
-            </h1>
+            {/* Revolving Radial Radar Scope */}
+            <div className="crt-screen-orange aspect-square rounded-full border-4 border-[#282C36] relative flex items-center justify-center overflow-hidden my-2 shadow-inner">
+              
+              {/* Concentric Sonar Distance Rings */}
+              <div className="absolute w-[80%] h-[80%] rounded-full border border-[#FF6600]/30" />
+              <div className="absolute w-[55%] h-[55%] rounded-full border border-[#FF6600]/40" />
+              <div className="absolute w-[30%] h-[30%] rounded-full border border-[#FF6600]/50" />
+              
+              {/* Crosshair Axes */}
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-full h-[1px] bg-[#FF6600]/30" />
+                <div className="h-full w-[1px] bg-[#FF6600]/30" />
+              </div>
 
-            <p className="text-[15px] sm:text-[16px] font-sans text-slate-300 max-w-2xl leading-relaxed">
-              Automated hydroacoustic feature extraction for Side-Scan Sonar (SSS) and Forward-Looking Sonar (FLS). Couples edge neural detection with <strong>physics-informed acoustic shadow ray tracing</strong> and <strong>WGS84 geospatial trigonometry</strong> to eliminate false positives in real-time survey operations.
+              {/* Revolving Sweep Beam */}
+              <div className="absolute inset-0 animate-sonar-sweep pointer-events-none">
+                <div 
+                  className="w-1/2 h-1/2 origin-bottom-right"
+                  style={{
+                    background: 'conic-gradient(from 0deg at 100% 100%, rgba(255,102,0,0.5) 0deg, rgba(255,102,0,0.1) 45deg, transparent 90deg)'
+                  }}
+                />
+              </div>
+
+              {/* Detected Anomaly Blips (Buoyant Orange Glow) */}
+              <div className="absolute top-[32%] right-[28%] flex flex-col items-center">
+                <div className="w-3.5 h-3.5 rounded-full bg-[#FF6600] animate-pulse shadow-[0_0_12px_#FF6600]" />
+                <span className="text-[9px] bg-[#0A0C0F] text-[#FF6600] px-1 font-bold border border-[#FF6600] mt-0.5">
+                  CYLINDER (89%)
+                </span>
+              </div>
+
+              <div className="absolute bottom-[28%] left-[22%] flex flex-col items-center">
+                <div className="w-3 h-3 rounded-full bg-[#FFB000] animate-pulse shadow-[0_0_10px_#FFB000]" />
+                <span className="text-[9px] bg-[#0A0C0F] text-[#FFB000] px-1 font-bold border border-[#FFB000] mt-0.5">
+                  GHOST NET (78%)
+                </span>
+              </div>
+
+              {/* Center Vessel Marker */}
+              <div className="w-2 h-2 rounded-full bg-white shadow-[0_0_8px_#FFF] z-10" />
+            </div>
+
+            {/* Monitor Footer Readout */}
+            <div className="flex items-center justify-between text-[10px] pt-1 text-slate-400">
+              <span>LAT: 13°04'57"N LON: 80°16'14"E</span>
+              <span className="text-[#FF6600] font-bold">PHYSICS SHADOW: OK</span>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      {/* ===================================================================
+          3. PROBLEM STATEMENT SECTION (MoES SIH 26057)
+          =================================================================== */}
+      <section className="skeuo-chassis p-6 relative space-y-6">
+        {/* Simulated Physical Hex Screws in 4 Corners */}
+        <HexScrew className="absolute top-3 left-3" />
+        <HexScrew className="absolute top-3 right-3" />
+        <HexScrew className="absolute bottom-3 left-3" />
+        <HexScrew className="absolute bottom-3 right-3" />
+
+        {/* Section Header Plaque */}
+        <div className="flex items-center justify-between border-b border-[#3A4150] pb-3 px-4">
+          <div className="flex items-center gap-3">
+            <div className="skeuo-plaque px-4 py-1.5 text-[14px] font-black tracking-widest text-[#FF6600]">
+              TACTICAL CHALLENGE: MoES SIH 26057
+            </div>
+            <span className="text-[11px] text-slate-400 hidden sm:inline">
+              [MINISTRY OF EARTH SCIENCES • SEABED DEBRIS MONITORS]
+            </span>
+          </div>
+        </div>
+
+        {/* 3 Tactile Cards with Heavy Inset Bevels */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+          
+          {/* Card 1: Speckle Noise Interference */}
+          <div className="skeuo-panel p-5 space-y-3 relative flex flex-col justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[#FF6600] font-bold text-[12px] uppercase">CHALLENGE 01</span>
+                <LedLight state="orange" />
+              </div>
+              <h3 className="text-[15px] font-extrabold text-white">Speckle Noise Interference</h3>
+              <p className="text-[12px] text-slate-300 leading-relaxed font-sans">
+                Side-scan sonar image feeds are severely corrupted by Rayleigh acoustic speckle noise, masking submerged ghost nets and pipeline anomalies.
+              </p>
+            </div>
+
+            {/* Oscilloscope Graphic Mockup */}
+            <div className="skeuo-inset p-2.5 space-y-1">
+              <div className="flex justify-between text-[9px] text-slate-400">
+                <span>RAW SPECKLE WAVEFORM</span>
+                <span className="text-[#FF6600]">SNR: -8.4 dB</span>
+              </div>
+              <div className="h-14 w-full bg-[#080A0D] rounded border border-[#232834] flex items-center justify-center relative overflow-hidden">
+                <svg className="w-full h-full text-[#FF6600] opacity-80" viewBox="0 0 200 40">
+                  <path d="M0,20 Q10,5 20,35 T40,10 T60,30 T80,2 T100,38 T120,8 T140,32 T160,12 T180,28 T200,20" fill="none" stroke="currentColor" strokeWidth="1.5" />
+                </svg>
+              </div>
+            </div>
+          </div>
+
+          {/* Card 2: Scan Area Overhead Dial */}
+          <div className="skeuo-panel p-5 space-y-3 relative flex flex-col justify-between">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[#FF6600] font-bold text-[12px] uppercase">CHALLENGE 02</span>
+                <LedLight state="amber" />
+              </div>
+              <h3 className="text-[15px] font-extrabold text-white">Manual Bottleneck Delay</h3>
+              <p className="text-[12px] text-slate-300 leading-relaxed font-sans">
+                Human hydrographers require up to 4 hours per km² to manually annotate target imagery, leading to massive survey backlogs.
+              </p>
+            </div>
+
+            {/* Analog Dial Indicator Mockup */}
+            <div className="skeuo-inset p-3 flex items-center justify-between">
+              <div className="space-y-0.5">
+                <span className="text-[10px] text-slate-400 block">PROCESSING DELAY</span>
+                <span className="text-[14px] font-black text-amber-400">3.5 HRS / KM²</span>
+              </div>
+              {/* Dial Gauge SVG */}
+              <div className="w-12 h-12 rounded-full border-2 border-[#3E4554] bg-[#14171D] relative flex items-center justify-center">
+                <div className="w-1 h-5 bg-[#FF6600] origin-bottom -rotate-45 rounded-full" />
+                <div className="w-2 h-2 rounded-full bg-white z-10" />
+              </div>
+            </div>
+          </div>
+
+          {/* Card 3: Marine Ecosystem Hazard Plate */}
+          <div className="skeuo-panel p-5 space-y-3 relative flex flex-col justify-between border-l-4 border-amber-500">
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-amber-400 font-bold text-[12px] uppercase">HAZARD IMPACT</span>
+                <AlertTriangle className="w-4 h-4 text-amber-400" />
+              </div>
+              <h3 className="text-[15px] font-extrabold text-white">Coastal Marine Hazards</h3>
+              <p className="text-[12px] text-slate-300 leading-relaxed font-sans">
+                Unmapped ghost fishing gear, abandoned containers, and underwater wreckage threaten marine life and navigation safety in Indian EEZ waters.
+              </p>
+            </div>
+
+            <div className="skeuo-inset p-2.5 bg-amber-950/20 border border-amber-500/40 text-[10px] text-amber-300 space-y-1">
+              <div className="font-bold flex items-center gap-1">
+                <span>HAZARD ALERT: INDIAN COASTAL SECTORS</span>
+              </div>
+              <div>Ghost Nets: ~640,000 Tons Annual Marine Entanglement</div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* ===================================================================
+          4. TECHNICAL CAPABILITIES & BACKEND MODULES (3x2 Rack Units)
+          =================================================================== */}
+      <section className="skeuo-chassis p-6 space-y-5">
+        <div className="flex items-center justify-between border-b border-[#3A4150] pb-3">
+          <div className="flex items-center gap-3">
+            <Cpu className="w-5 h-5 text-[#FF6600]" />
+            <h2 className="text-[16px] font-black text-white uppercase tracking-wider">
+              MODULAR BACKEND CAPABILITIES (3x2 HARDWARE RACK UNITS)
+            </h2>
+          </div>
+          <span className="text-[11px] text-slate-400 hidden sm:inline">[ANALOG KNOBS • DIGITAL SEGMENT READOUTS]</span>
+        </div>
+
+        {/* 3x2 Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          
+          {/* Rack 1: Signal Conditioning & Speckle Filter */}
+          <div className="skeuo-panel p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-[#2D323E] pb-2">
+              <span className="text-[11px] font-bold text-[#FF6600]">RACK 01 // DSP</span>
+              <LedLight state="orange" />
+            </div>
+            <h4 className="text-[13px] font-extrabold text-white">Signal Conditioning & Speckle Filter</h4>
+            <p className="text-[11px] text-slate-300 font-sans">
+              Bilateral despeckling algorithm preserves sharp object edges while CLAHE normalizes acoustic beam attenuation.
             </p>
 
-            <div className="pt-2 flex flex-col sm:flex-row items-start sm:items-center gap-4">
-              <button
-                onClick={onLaunchDashboard}
-                className="px-6 py-3.5 rounded-[2px] bg-[#c98a4b] hover:bg-[#b87d40] text-[#080d16] font-mono font-bold text-[14px] tracking-wider uppercase border border-[#96632f] flex items-center gap-2.5 transition-colors cursor-pointer"
+            {/* Rotatable Analog Knob Interactive Widget */}
+            <div className="skeuo-inset p-3 flex items-center justify-between">
+              <div>
+                <span className="text-[9px] text-slate-400 block">CLAHE CLIP LIMIT</span>
+                <span className="text-[13px] font-extrabold text-[#FF6600]">
+                  {(2.0 + (filterKnobAngle / 360) * 2).toFixed(1)}x
+                </span>
+              </div>
+              <button 
+                onClick={rotateFilterKnob}
+                className="w-12 h-12 rounded-full border-2 border-[#565E70] bg-gradient-to-b from-[#3A4150] to-[#1E222A] relative flex items-center justify-center cursor-pointer shadow-md hover:border-[#FF6600]"
+                title="Click to adjust analog filter knob"
               >
-                <Play className="w-4 h-4 fill-current text-[#080d16]" />
-                <span>Launch Live Sonar Analysis</span>
+                <div 
+                  className="w-1 h-5 bg-[#FF6600] origin-bottom rounded-full transition-transform duration-200"
+                  style={{ transform: `rotate(${filterKnobAngle}deg)` }}
+                />
               </button>
-
-              <span className="text-[12.5px] font-mono text-slate-400">
-                Sub-20ms Edge Pipeline Latency
-              </span>
             </div>
           </div>
 
-          {/* Right Column: Authentic Grainy Sonar Waterfall Visual with Live Detection Box */}
-          <div className="lg:col-span-5 relative flex items-center justify-center">
-            <div className="w-full bg-[#181818] border border-white/12 rounded-[2px] p-2 relative shadow-2xl overflow-hidden">
-              
-              {/* Header Bar on Sonar Visual */}
-              <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-white/08 text-[11px] font-mono text-slate-400">
-                <span className="flex items-center gap-1.5 text-slate-300">
-                  <span className="w-1.5 h-1.5 rounded-[1px] bg-emerald-500"></span>
-                  LIVE ACOUSTIC SWATH CAPTURE
-                </span>
-                <span className="text-[#c98a4b]">ALT: 18m • SWATH: 100m</span>
-              </div>
-
-              {/* Sonar Image Container */}
-              <div className="relative bg-black rounded-[1px] overflow-hidden min-h-[320px] max-h-[380px] flex items-center justify-center border border-white/06">
-                {heroSonarUrl ? (
-                  <img
-                    src={heroSonarUrl}
-                    alt="Authentic Sonar Waterfall Record"
-                    className="w-full h-full object-cover grayscale contrast-125 opacity-90"
-                  />
-                ) : (
-                  /* Procedural Acoustic Waterfall Texture Fallback */
-                  <div className="w-full h-80 bg-[#0d0d0d] relative overflow-hidden flex items-center justify-center">
-                    {/* Nadir Water Column */}
-                    <div className="absolute inset-y-0 w-8 bg-black/95 border-x border-white/10 left-1/2 -translate-x-1/2 flex items-center justify-center">
-                      <span className="text-[8px] font-mono text-slate-600 -rotate-90">NADIR TRACK</span>
-                    </div>
-                    {/* Rayleigh Speckle Noise Layer */}
-                    <div className="absolute inset-0 opacity-20 bg-[radial-gradient(#fff_1px,transparent_1px)] [background-size:8px_8px]"></div>
-                  </div>
-                )}
-
-                {/* Top Lateral Scale Ruler Overlay */}
-                <div className="absolute top-2 left-2 right-2 flex items-center justify-between pointer-events-none text-[10px] font-mono">
-                  <span className="px-1.5 py-0.2 rounded-[1px] bg-black/85 border border-white/15 text-slate-300">
-                    PORT -50m
-                  </span>
-                  <span className="px-1.5 py-0.2 rounded-[1px] bg-black/85 border border-[#c98a4b]/40 text-[#c98a4b] font-bold">
-                    NADIR 0.0m
-                  </span>
-                  <span className="px-1.5 py-0.2 rounded-[1px] bg-black/85 border border-white/15 text-slate-300">
-                    STBD +50m
-                  </span>
-                </div>
-
-                {/* Single Dominant Amber Detection Bounding Box Overlay */}
-                <div className="absolute top-[28%] right-[16%] w-44 h-24 border-2 border-[#c98a4b] bg-[#c98a4b]/10 pointer-events-none">
-                  {/* Corner Accent Brackets */}
-                  <div className="absolute -top-1 -left-1 w-2.5 h-2.5 border-t-2 border-l-2 border-[#c98a4b]"></div>
-                  <div className="absolute -top-1 -right-1 w-2.5 h-2.5 border-t-2 border-r-2 border-[#c98a4b]"></div>
-                  <div className="absolute -bottom-1 -left-1 w-2.5 h-2.5 border-b-2 border-l-2 border-[#c98a4b]"></div>
-                  <div className="absolute -bottom-1 -right-1 w-2.5 h-2.5 border-b-2 border-r-2 border-[#c98a4b]"></div>
-
-                  {/* Target Label Badge */}
-                  <div className="absolute -top-6 left-0 bg-[#141414] border border-[#c98a4b] px-2 py-0.5 text-[11px] font-mono text-[#c98a4b] font-extrabold flex items-center gap-1.5 whitespace-nowrap shadow-md">
-                    <span>CYLINDER · 73%</span>
-                    <span className="text-white text-[9px] font-normal">• PHYSICS-VERIFIED</span>
-                  </div>
-
-                  {/* Measurement Sub-Readout */}
-                  <div className="absolute -bottom-5 left-0 bg-black/90 border border-white/15 px-1.5 py-0.2 text-[9px] font-mono text-slate-300 whitespace-nowrap">
-                    HL: 194 | SHDW: 18 | Δ: 10.7x | +24.6m Stbd
-                  </div>
-                </div>
-
-                {/* Bottom Status Ticker */}
-                <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between text-[10px] font-mono text-slate-400 bg-black/85 px-2 py-0.5 border border-white/10 pointer-events-none">
-                  <span>LAT: 17.6868°N • LON: 83.2185°E</span>
-                  <span className="text-emerald-400 font-bold">RAYLEIGH SHADOW DETECTED</span>
-                </div>
-              </div>
+          {/* Rack 2: Acoustic Segmentation Engine */}
+          <div className="skeuo-panel p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-[#2D323E] pb-2">
+              <span className="text-[11px] font-bold text-[#FF6600]">RACK 02 // NEURAL</span>
+              <LedLight state="orange" />
             </div>
-          </div>
-        </div>
+            <h4 className="text-[13px] font-extrabold text-white">Acoustic Segmentation Engine</h4>
+            <p className="text-[11px] text-slate-300 font-sans">
+              Dual-path feature extractor proposing bounding polygons for 5 debris classes at sub-20ms speeds.
+            </p>
 
-        {/* 3. Circular "Scroll to Explore Pipeline" Indicator */}
-        <div className="flex justify-center pt-4">
-          <button
-            onClick={scrollToPipeline}
-            className="group flex flex-col items-center gap-2 text-slate-400 hover:text-[#c98a4b] transition-colors cursor-pointer"
-          >
-            <span className="text-[11px] font-mono tracking-wider uppercase">
-              Scroll to explore architecture
-            </span>
-            <div className="w-8 h-8 rounded-full border border-white/15 group-hover:border-[#c98a4b] flex items-center justify-center transition-colors bg-[#181818]">
-              <ArrowDown className="w-4 h-4 text-[#c98a4b] animate-bounce" />
-            </div>
-          </button>
-        </div>
-      </section>
-
-      {/* 4. Full-Width Horizontal Spec Ticker Strip */}
-      <section className="w-full bg-[#181818] border-b border-white/08 py-3.5 px-6 overflow-hidden select-none">
-        <div className="max-w-7xl mx-auto flex items-center justify-between gap-6 text-[12px] font-mono font-bold text-slate-300 uppercase tracking-wider overflow-x-auto whitespace-nowrap">
-          {TICKER_ITEMS.map((item, index) => (
-            <React.Fragment key={index}>
-              <span className="text-white hover:text-[#c98a4b] transition-colors flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-[1px] bg-[#c98a4b]"></span>
-                {item}
-              </span>
-              {index < TICKER_ITEMS.length - 1 && (
-                <span className="text-[#c98a4b]/60 font-black select-none">//</span>
-              )}
-            </React.Fragment>
-          ))}
-        </div>
-      </section>
-
-      {/* 5. Main Below-the-Fold Technical Content */}
-      <div id="pipeline-section" className="max-w-7xl mx-auto px-6 lg:px-12 py-10 space-y-10 text-left">
-        
-        {/* Core Technical Innovations Grid */}
-        <section className="space-y-4">
-          <div className="flex items-center gap-2 pb-2 border-b border-white/08 text-[18px] font-mono font-bold text-white tracking-wide">
-            <div className="p-1.5 rounded-[2px] bg-[#1f1f1f] border border-white/10 text-[#c98a4b]">
-              <Shield className="w-4 h-4" />
-            </div>
-            <span>Core Technical Innovations & Engineering Specifications</span>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 text-[13px] font-mono">
-            <div className="p-4 rounded-[2px] bg-[#1f1f1f] border border-white/08 space-y-1.5">
-              <span className="text-[#c98a4b] font-bold text-[14px] block">
-                Bilateral Despeckling
-              </span>
-              <p className="text-slate-300 text-[13px] font-sans leading-relaxed">
-                Preserves sharp boundary gradients of thin netting and cables while non-linearly suppressing multiplicative Rayleigh acoustic speckle noise without Gaussian blur.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-[2px] bg-[#1f1f1f] border border-white/08 space-y-1.5">
-              <span className="text-[#c98a4b] font-bold text-[14px] block">
-                CLAHE Normalization
-              </span>
-              <p className="text-slate-300 text-[13px] font-sans leading-relaxed">
-                Contrast Limited Adaptive Histogram Equalization compensates for transmission loss and acoustic spreading across lateral swath outer boundaries.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-[2px] bg-[#1f1f1f] border border-white/08 space-y-1.5">
-              <span className="text-[#c98a4b] font-bold text-[14px] block">
-                Physics Shadow Ray Tracing
-              </span>
-              <p className="text-slate-300 text-[13px] font-sans leading-relaxed">
-                Ray traces directional acoustic shadows away from the towfish nadir track to confirm physical seabed relief and eliminate false positive reverberations.
-              </p>
-            </div>
-
-            <div className="p-4 rounded-[2px] bg-[#1f1f1f] border border-white/08 space-y-1.5">
-              <span className="text-[#c98a4b] font-bold text-[14px] block">
-                WGS84 Swath Trigonometry
-              </span>
-              <p className="text-slate-300 text-[13px] font-sans leading-relaxed">
-                Applies Pythagoras ground-range slant correction and 2D vessel heading rotation matrix to translate pixel indices into sub-meter WGS84 coordinates.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* Centerpiece: Interactive 8-Stage Acoustic Pipeline Flow */}
-        <section className="space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-white/08">
-            <div>
-              <span className="text-[12px] font-mono font-bold text-[#c98a4b] uppercase tracking-wider block mb-1">
-                SYSTEM ARCHITECTURE & EXECUTION FLOW
-              </span>
-              <h2 className="text-[20px] font-mono font-bold text-white tracking-wide">
-                End-to-End Autonomous Hydroacoustic Pipeline
-              </h2>
-            </div>
-            <span className="text-[12.5px] font-mono text-slate-400">
-              Click any stage node below to inspect mathematical & technical specifications
-            </span>
-          </div>
-
-          {/* Interactive Horizontal / Responsive Pipeline Stage Nodes */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-            {PIPELINE_STAGES.map((stage, idx) => {
-              const isSelected = selectedStage.id === stage.id;
-              return (
-                <button
-                  key={stage.id}
-                  onClick={() => setSelectedStage(stage)}
-                  className={`p-3 rounded-[2px] border text-left transition-all flex flex-col justify-between min-h-[105px] cursor-pointer ${
-                    isSelected
-                      ? 'bg-[#242424] border-[#c98a4b] text-white ring-1 ring-[#c98a4b]'
-                      : 'bg-[#181818] border-white/08 text-slate-400 hover:border-white/20 hover:bg-[#1f1f1f]'
-                  }`}
-                >
-                  <div className="flex items-center justify-between w-full mb-1">
-                    <span className="text-[11px] font-mono font-extrabold text-[#c98a4b]">
-                      {stage.number}
-                    </span>
-                    <span className="text-[9.5px] font-mono px-1 py-0.2 rounded-[1px] bg-[#141414] text-slate-400 border border-white/06">
-                      {stage.tag.split(' ')[0]}
-                    </span>
-                  </div>
-
-                  <div className="font-mono font-bold text-[12.5px] text-slate-200 leading-snug line-clamp-2">
-                    {stage.shortName}
-                  </div>
-
-                  <div className="text-[10px] font-mono text-slate-500 truncate mt-1">
-                    {idx < PIPELINE_STAGES.length - 1 ? '→ Next Stage' : '✓ Final Output'}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
-
-          {/* Active Stage Detailed Technical Breakdown Card */}
-          <div className="bg-[#1f1f1f] border border-white/08 rounded-[2px] p-5 space-y-4 text-left">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-white/08">
-              <div className="flex items-center gap-3">
-                <span className="text-[14px] font-mono font-bold px-2.5 py-1 rounded-[2px] bg-[#141414] text-[#c98a4b] border border-[#c98a4b]/40">
-                  STAGE {selectedStage.number}
-                </span>
-                <h3 className="text-[18px] font-mono font-bold text-white tracking-wide">
-                  {selectedStage.name}
-                </h3>
-              </div>
-
-              <span className="text-[12px] font-mono text-slate-400 px-2 py-0.5 rounded-[2px] bg-[#141414] border border-white/08">
-                Module: {selectedStage.module}
-              </span>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-              {/* Left Details */}
-              <div className="lg:col-span-7 space-y-3">
-                <div>
-                  <span className="text-[11.5px] font-mono font-bold text-slate-400 uppercase block mb-1">
-                    Operational Purpose
-                  </span>
-                  <p className="text-[14px] font-sans text-slate-200 leading-relaxed">
-                    {selectedStage.summary}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-[11.5px] font-mono font-bold text-slate-400 uppercase block mb-1">
-                    Technical Implementation & Justification
-                  </span>
-                  <p className="text-[13.5px] font-sans text-slate-300 leading-relaxed">
-                    {selectedStage.technicalDetails}
-                  </p>
-                </div>
-              </div>
-
-              {/* Right Algorithm & Code Formula Box */}
-              <div className="lg:col-span-5 bg-[#141414] border border-white/08 rounded-[2px] p-4 flex flex-col justify-between space-y-3">
-                <div>
-                  <span className="text-[11px] font-mono text-slate-400 uppercase block mb-1.5 flex items-center gap-1.5">
-                    <Terminal className="w-3.5 h-3.5 text-[#c98a4b]" />
-                    Algorithm & Formula Reference
-                  </span>
-                  <div className="p-2.5 rounded-[2px] bg-[#0d0d0d] border border-white/06 font-mono text-[12.5px] text-[#c98a4b] break-all leading-relaxed">
-                    {selectedStage.algorithm}
-                  </div>
-                </div>
-
-                <div className="pt-2 border-t border-white/06 flex items-center justify-between text-[12px] font-mono text-slate-400">
-                  <span>Pipeline Latency Target:</span>
-                  <span className="text-emerald-400 font-bold">&lt; 20 ms Total</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Evaluator Quick Guide (Standard Operating Procedure) */}
-        <section className="bg-[#1f1f1f] border border-white/08 rounded-[2px] p-5 space-y-4">
-          <div className="flex items-center justify-between pb-3 border-b border-white/08">
-            <div className="flex items-center gap-2.5 text-[18px] font-mono font-bold text-white tracking-wide">
-              <div className="p-1.5 rounded-[2px] bg-[#141414] border border-white/10 text-[#c98a4b]">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-              <span>Evaluator Standard Operating Procedure (Step-by-Step Test Guide)</span>
-            </div>
-            <span className="text-[12px] font-mono text-slate-400 hidden sm:inline">
-              Follow numbered test sequence for evaluation
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
-            {EVALUATOR_STEPS.map((step) => (
-              <div
-                key={step.step}
-                className="bg-[#141414] border border-white/06 p-3.5 rounded-[2px] flex flex-col justify-between space-y-2"
+            {/* Dual-Path Processing Toggle Switch */}
+            <div className="skeuo-inset p-3 flex items-center justify-between">
+              <span className="text-[10px] text-slate-400">MODEL CORE:</span>
+              <button
+                onClick={toggleModel}
+                className="skeuo-btn text-[11px] px-3 py-1.5 uppercase flex items-center gap-2"
               >
-                <div>
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span className="text-[11px] font-mono font-extrabold px-1.5 py-0.2 rounded-[1px] bg-[#242424] text-[#c98a4b] border border-[#c98a4b]/30">
-                      STEP {step.step}
-                    </span>
-                    <h4 className="text-[14px] font-mono font-bold text-slate-100">
-                      {step.title}
-                    </h4>
-                  </div>
-                  <p className="text-[13px] font-sans text-slate-300 leading-relaxed">
-                    {step.desc}
-                  </p>
-                </div>
-              </div>
-            ))}
+                <span className={segmentationModel === 'yolov8' ? 'text-[#FF6600] font-bold' : 'text-slate-400'}>YOLOv8-SEG</span>
+                <span className="text-slate-600">/</span>
+                <span className={segmentationModel === 'unet' ? 'text-[#FF6600] font-bold' : 'text-slate-400'}>U-NET</span>
+              </button>
+            </div>
           </div>
 
-          {/* Quick Preset Direct Triggers */}
-          {presets && presets.length > 0 && (
-            <div className="pt-3 border-t border-white/08">
-              <div className="flex items-center justify-between mb-2.5">
-                <span className="text-[12.5px] font-mono font-bold text-slate-300 uppercase tracking-wider">
-                  Direct Launch with Standardized MoES Benchmark Scenario:
-                </span>
-                <span className="text-[11.5px] font-mono text-slate-500">
-                  Instant Ingestion & 1-Click Execution
-                </span>
-              </div>
+          {/* Rack 3: Sonar Nav Log Converter */}
+          <div className="skeuo-panel p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-[#2D323E] pb-2">
+              <span className="text-[11px] font-bold text-amber-400">RACK 03 // NAV</span>
+              <LedLight state="amber" />
+            </div>
+            <h4 className="text-[13px] font-extrabold text-white">Sonar Nav Log Converter</h4>
+            <p className="text-[11px] text-slate-300 font-sans">
+              Decodes NMEA vessel strings & towfish altitude into calibrated WGS84 target coordinates.
+            </p>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-                {presets.map((p) => {
-                  const pColor = CLASS_COLORS[p.target_type] || CLASS_COLORS.unknown_anomaly;
-                  return (
-                    <button
-                      key={p.id}
-                      onClick={() => onSelectPresetAndLaunch(p)}
-                      className="group flex items-center justify-between p-3 rounded-[2px] bg-[#181818] border border-white/08 hover:border-[#c98a4b] hover:bg-[#242424] transition-colors text-left font-mono cursor-pointer"
-                    >
-                      <div className="truncate pr-2">
-                        <div className="text-[13px] font-bold text-slate-200 group-hover:text-white truncate">
-                          {p.name.split('—')[0]}
-                        </div>
-                        <div className="text-[11.5px] text-slate-400 truncate mt-0.5">
-                          {p.target_type.replace('_', ' ')} • {p.nav.vessel_lat.toFixed(2)}°N
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-1 text-[12px] text-[#c98a4b] flex-shrink-0 font-bold">
-                        <span>Run</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </div>
-                    </button>
-                  );
-                })}
+            {/* 80s Style Digital 7-Segment Display */}
+            <div className="led-segment-display text-center">
+              13°04.962' N | 080°16.242' E
+            </div>
+          </div>
+
+          {/* Rack 4: XTF/SDF Stream Demuxer */}
+          <div className="skeuo-panel p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-[#2D323E] pb-2">
+              <span className="text-[11px] font-bold text-[#FF6600]">RACK 04 // I/O PORT</span>
+              <LedLight state="orange" />
+            </div>
+            <h4 className="text-[13px] font-extrabold text-white">XTF / SDF Stream Demuxer</h4>
+            <p className="text-[11px] text-slate-300 font-sans">
+              Directly demuxes binary eXtended Triton Format (XTF) sonar waterfall packages.
+            </p>
+
+            {/* Hardware Port Interface Graphic */}
+            <div className="skeuo-inset p-2.5 flex items-center justify-around text-[10px] text-slate-400">
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-5 h-5 rounded-full border-2 border-slate-500 bg-black flex items-center justify-center">
+                  <div className="w-1.5 h-1.5 rounded-full bg-[#FF6600]" />
+                </div>
+                <span>BNC-01 (500kHz)</span>
+              </div>
+              <div className="flex flex-col items-center gap-1">
+                <div className="w-5 h-5 rounded-full border-2 border-slate-500 bg-black flex items-center justify-center">
+                  <div className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+                </div>
+                <span>RS422 NMEA</span>
               </div>
             </div>
-          )}
-        </section>
-
-      </div>
-
-      {/* Footer */}
-      <footer className="mt-12 py-5 border-t border-white/08 bg-[#141414] text-center font-mono text-[12px] text-slate-500">
-        <div className="max-w-7xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-2 text-slate-400">
-          <div>
-            Ministry of Earth Sciences (MoES) • Smart India Hackathon Track SIH26057
           </div>
-          <div className="text-[11px] text-slate-500">
-            Automated SSS & FLS Acoustic Anomaly Processing Architecture
+
+          {/* Rack 5: Severity Heatmap Plotter */}
+          <div className="skeuo-panel p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-[#2D323E] pb-2">
+              <span className="text-[11px] font-bold text-[#FF6600]">RACK 05 // DENSITY</span>
+              <LedLight state="orange" />
+            </div>
+            <h4 className="text-[13px] font-extrabold text-white">Severity Heatmap Plotter</h4>
+            <p className="text-[11px] text-slate-300 font-sans">
+              Generates spatial hazard density matrices for coastal survey zone prioritization.
+            </p>
+
+            <div className="skeuo-inset p-2 grid grid-cols-6 gap-1 h-10">
+              {Array.from({ length: 18 }).map((_, i) => (
+                <div 
+                  key={i} 
+                  className="rounded-[1px]"
+                  style={{
+                    backgroundColor: i % 5 === 0 ? '#FF6600' : i % 3 === 0 ? '#FFB000' : '#1F2430'
+                  }}
+                />
+              ))}
+            </div>
           </div>
+
+          {/* Rack 6: AUV/ROV Embedded Core */}
+          <div className="skeuo-panel p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-[#2D323E] pb-2">
+              <span className="text-[11px] font-bold text-[#FF6600]">RACK 06 // EDGE CORE</span>
+              <LedLight state="orange" />
+            </div>
+            <h4 className="text-[13px] font-extrabold text-white">AUV / ROV Embedded Core</h4>
+            <p className="text-[11px] text-slate-300 font-sans">
+              Ruggedized low-wattage ONNX runtime engine designed for autonomous underwater vehicles.
+            </p>
+
+            <div className="skeuo-inset p-2 flex justify-between text-[10px]">
+              <span className="text-slate-400">ENVELOPE: <strong className="text-white">15W TDP</strong></span>
+              <span className="text-slate-400">LATENCY: <strong className="text-[#FF6600]">17ms</strong></span>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      {/* ===================================================================
+          5. INTERACTIVE DEMO / SONAR TERMINAL SECTION
+          =================================================================== */}
+      <section className="skeuo-chassis p-6 space-y-6">
+        <div className="flex items-center justify-between border-b border-[#3A4150] pb-3">
+          <div className="flex items-center gap-3">
+            <Terminal className="w-5 h-5 text-[#FF6600]" />
+            <h2 className="text-[16px] font-black text-white uppercase tracking-wider">
+              INTERACTIVE DEMO // SONAR TERMINAL CONSOLE
+            </h2>
+          </div>
+          <span className="text-[11px] text-slate-400 hidden sm:inline">[DUAL WIPE LEVER • LIVE MONITORING]</span>
+        </div>
+
+        {/* Dual-Screen Oscilloscope/Sonar View with Tactile Wipe Slider */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between text-[12px]">
+            <span className="text-slate-300 font-bold uppercase">WIPE SLIDER LEVER:</span>
+            <div className="flex items-center gap-4 text-[11px]">
+              <span className={wipePosition < 40 ? 'text-[#FF6600] font-bold' : 'text-slate-400'}>
+                [RAW ACOUSTIC FEED]
+              </span>
+              <span className="text-slate-600">◄ LEVER ►</span>
+              <span className={wipePosition >= 40 ? 'text-[#FF6600] font-bold' : 'text-slate-400'}>
+                [FILTERED BOUNDING BOXES]
+              </span>
+            </div>
+          </div>
+
+          {/* Skeuomorphic Slider Track */}
+          <div className="skeuo-inset p-2 relative">
+            <input
+              type="range"
+              min="0"
+              max="100"
+              value={wipePosition}
+              onChange={(e) => {
+                soundFx.playToggle();
+                setWipePosition(Number(e.target.value));
+              }}
+              className="w-full accent-[#FF6600] cursor-pointer h-3 rounded"
+            />
+          </div>
+
+          {/* Sonar Waterfall Frame with Interactive Wipe Divider */}
+          <div className="crt-frame h-72 crt-scanlines relative overflow-hidden flex items-center justify-center">
+            
+            {/* Raw Side (Left Layer) */}
+            <div className="absolute inset-0 bg-[#0B0803] flex items-center justify-center">
+              <div className="w-full h-full opacity-60 bg-[radial-gradient(#FF6600_1px,transparent_1px)] [background-size:12px_12px]" />
+              <div className="absolute top-4 left-4 bg-black/80 px-2 py-1 text-[10px] text-amber-400 border border-amber-500">
+                RAW ACOUSTIC WATERFALL (HIGH NOISE)
+              </div>
+            </div>
+
+            {/* Filtered Bounding Box Side (Right Layer clipped by wipePosition) */}
+            <div 
+              className="absolute inset-0 bg-[#070502] border-l-2 border-[#FF6600] transition-all"
+              style={{ left: `${wipePosition}%` }}
+            >
+              <div className="absolute top-4 left-4 bg-[#FF6600] text-[#0A0C0F] px-2 py-1 text-[10px] font-black uppercase">
+                FILTERED + YOLOV8 BOUNDING BOXES
+              </div>
+
+              {/* Target Bounding Box */}
+              <div className="absolute top-1/3 left-1/4 w-40 h-24 border-2 border-[#FF6600] bg-[#FF6600]/20 flex flex-col justify-between p-1.5 shadow-[0_0_15px_rgba(255,102,0,0.4)]">
+                <span className="text-[9px] bg-black text-[#FF6600] px-1 font-bold w-max border border-[#FF6600]">
+                  GHOST_NET · 92% CONF
+                </span>
+                <span className="text-[8px] text-[#FF6600] font-mono">
+                  HL: 184 | SHDW: 12 | Δ: 15.3x
+                </span>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        {/* Live Sonar Terminal Log & Map Plotter Console */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          
+          {/* Terminal Logs View (Buoyant Orange Text) */}
+          <div className="lg:col-span-7 skeuo-inset p-4 font-mono text-[11px] space-y-2 crt-scanlines">
+            <div className="flex items-center justify-between border-b border-[#252A34] pb-2">
+              <span className="text-[#FF6600] font-bold uppercase flex items-center gap-2">
+                <Terminal className="w-3.5 h-3.5" />
+                LIVE SONAR TERMINAL LOGS
+              </span>
+              <button
+                onClick={() => {
+                  soundFx.playClick();
+                  setIsLogPaused(!isLogPaused);
+                }}
+                className="skeuo-btn text-[9px] px-2 py-0.5"
+              >
+                {isLogPaused ? 'RESUME FEED' : 'PAUSE FEED'}
+              </button>
+            </div>
+
+            <div className="h-44 overflow-y-auto space-y-1 pr-2 orange-crt-glow font-mono">
+              {terminalLogs.map((log, idx) => (
+                <div key={idx} className="leading-snug">
+                  {log}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Map Console Plotter */}
+          <div className="lg:col-span-5 skeuo-panel p-4 space-y-3">
+            <div className="flex items-center justify-between border-b border-[#2D323E] pb-2">
+              <span className="text-[11px] font-bold text-white uppercase flex items-center gap-2">
+                <MapPin className="w-3.5 h-3.5 text-[#FF6600]" />
+                MECHANICAL MAP CONSOLE
+              </span>
+              <span className="text-[9px] text-[#FF6600]">WGS84 GRID</span>
+            </div>
+
+            <div className="skeuo-inset h-44 p-3 relative flex items-center justify-center overflow-hidden">
+              {/* Bathymetric Grid */}
+              <div className="absolute inset-0 opacity-20 bg-[linear-gradient(to_right,#FF6600_1px,transparent_1px),linear-gradient(to_bottom,#FF6600_1px,transparent_1px)] [background-size:20px_20px]" />
+              
+              {/* Target Pins */}
+              <div className="absolute top-1/4 left-1/3 flex flex-col items-center">
+                <MapPin className="w-5 h-5 text-[#FF6600] animate-bounce" />
+                <span className="text-[8px] bg-black text-[#FF6600] px-1 border border-[#FF6600]">
+                  NET-01
+                </span>
+              </div>
+
+              <div className="absolute bottom-1/3 right-1/4 flex flex-col items-center">
+                <MapPin className="w-5 h-5 text-amber-400 animate-pulse" />
+                <span className="text-[8px] bg-black text-amber-400 px-1 border border-amber-400">
+                  DRUM-02
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+      </section>
+
+      {/* ===================================================================
+          6. FLOPPY DISK / CASSETTE FILE LOADER MODAL
+          =================================================================== */}
+      {isFileModalOpen && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="skeuo-chassis w-full max-w-lg p-6 space-y-4 border-2 border-[#FF6600]">
+            
+            <div className="flex items-center justify-between border-b border-[#3A4150] pb-2">
+              <span className="text-[#FF6600] font-black text-[14px] flex items-center gap-2 uppercase">
+                <HardDrive className="w-4 h-4" />
+                FLOPPY DISK CASSETTE DECK LOADER
+              </span>
+              <button 
+                onClick={() => setIsFileModalOpen(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <p className="text-[12px] text-slate-300">
+                Insert 3.5" Floppy Diskette containing raw side-scan sonar XTF waterfall records.
+              </p>
+
+              {/* Progress Bar of Discrete Orange LED Blocks */}
+              <div className="space-y-1">
+                <div className="flex justify-between text-[10px] text-slate-400">
+                  <span>INGESTION STATUS:</span>
+                  <span className="text-[#FF6600] font-bold">{fileProgress}%</span>
+                </div>
+                <div className="skeuo-inset p-1.5 grid grid-cols-10 gap-1 h-8">
+                  {Array.from({ length: 10 }).map((_, idx) => (
+                    <div 
+                      key={idx}
+                      className={`rounded-[1px] transition-all ${
+                        (idx + 1) * 10 <= fileProgress 
+                          ? 'bg-[#FF6600] shadow-[0_0_6px_#FF6600]' 
+                          : 'bg-[#1C202A]'
+                      }`}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Scenario Triggers */}
+              {presets && presets.length > 0 && (
+                <div className="space-y-2 pt-2">
+                  <span className="text-[11px] text-slate-400 font-bold block uppercase">
+                    Select Standardized Survey Scenario:
+                  </span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {presets.map((preset) => (
+                      <button
+                        key={preset.id}
+                        onClick={() => {
+                          soundFx.playClick();
+                          setIsFileModalOpen(false);
+                          onSelectPresetAndLaunch(preset);
+                        }}
+                        className="skeuo-btn text-[11px] p-2 text-left justify-start flex flex-col"
+                      >
+                        <span className="text-white font-bold">{preset.name.split('—')[0]}</span>
+                        <span className="text-[9px] text-[#FF6600]">{preset.target_type}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end pt-2">
+              <button
+                onClick={() => setIsFileModalOpen(false)}
+                className="skeuo-btn text-[11px] px-4 py-2"
+              >
+                CLOSE CASSETTE DECK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* FOOTER */}
+      <footer className="skeuo-chassis p-4 text-center text-[11px] text-slate-400 space-y-1">
+        <div>
+          Ministry of Earth Sciences (MoES) • Smart India Hackathon SIH-26057 Track
+        </div>
+        <div className="text-[10px] text-slate-500">
+          1990s Submarine Sonar Terminal & Tactical Equipment Console Architecture
         </div>
       </footer>
+
     </div>
   );
 }

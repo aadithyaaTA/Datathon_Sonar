@@ -4,87 +4,297 @@
 
 @layer base {
   body {
-    @apply bg-[#141414] text-[#E0E0E0] font-sans;
-    background-color: #141414;
+    @apply bg-[#14171d] text-[#E2E8F0] font-mono;
+    background-color: #14171d;
+    background-image: 
+      radial-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 0),
+      linear-gradient(to right, rgba(0,0,0,0.3) 1px, transparent 0),
+      linear-gradient(to bottom, rgba(0,0,0,0.3) 1px, transparent 0);
+    background-size: 24px 24px, 48px 48px, 48px 48px;
     min-height: 100vh;
     overflow-x: hidden;
     font-size: 14px;
     line-height: 1.5;
+    user-select: none;
   }
 }
 
-/* Neutral Graphite / Charcoal Instrument Panels (Zero Blue Tint, Sharp 2px Corners) */
-.instrument-panel {
-  background-color: #1f1f1f;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 2px;
-}
+/* ==========================================================================
+   1990S SUBMARINE SONAR TERMINAL & SKEUOMORPHIC TACTICAL STYLES
+   ========================================================================== */
 
-.instrument-card {
-  background-color: #242424;
-  border: 1px solid rgba(255, 255, 255, 0.07);
-  border-radius: 2px;
-}
-
-.instrument-card:hover {
-  border-color: rgba(255, 255, 255, 0.16);
-}
-
-.instrument-inset {
-  background-color: #181818;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 2px;
-}
-
-/* Faint Neutral Bathymetric Chart Watermark (< 2.5% Opacity) */
-.bathymetric-watermark {
+/* Outer Steel Chassis / Submarine Console Framework */
+.skeuo-chassis {
+  background: linear-gradient(165deg, #2D323E 0%, #222630 60%, #1A1D25 100%);
+  border: 2px solid #3E4554;
+  border-top-color: #4A5364;
+  border-left-color: #4A5364;
+  border-bottom-color: #12141A;
+  border-right-color: #12141A;
+  box-shadow: 
+    8px 12px 24px rgba(0, 0, 0, 0.85),
+    inset 1px 1px 0px rgba(255, 255, 255, 0.15),
+    inset -1px -1px 0px rgba(0, 0, 0, 0.6);
+  border-radius: 4px;
   position: relative;
 }
-.bathymetric-watermark::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='300' viewBox='0 0 600 300'%3E%3Cpath d='M0,50 Q150,90 300,40 T600,60 M0,100 Q180,140 320,90 T600,120 M0,160 Q140,210 290,150 T600,180 M0,220 Q200,260 350,210 T600,240 M0,270 Q160,295 310,260 T600,285' fill='none' stroke='%23ffffff' stroke-width='1.0' stroke-dasharray='4,6'/%3E%3Cpath d='M0,75 Q120,40 270,70 T600,90 M0,135 Q190,170 340,120 T600,150 M0,195 Q130,240 280,180 T600,210 M0,250 Q220,280 370,230 T600,265' fill='none' stroke='%23ffffff' stroke-width='0.7'/%3E%3C/svg%3E");
-  background-size: 500px 250px;
-  opacity: 0.025;
-  pointer-events: none;
-  z-index: 0;
+
+/* Carved Metal Plate / Module Rack Unit */
+.skeuo-panel {
+  background: linear-gradient(180deg, #282D38 0%, #1E222A 100%);
+  border: 1px solid #383E4C;
+  border-top: 1px solid #4B5263;
+  border-left: 1px solid #4B5263;
+  border-bottom: 1px solid #14171F;
+  border-right: 1px solid #14171F;
+  box-shadow: 
+    3px 4px 10px rgba(0, 0, 0, 0.7),
+    inset 1px 1px 0px rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
 }
 
-/* Custom Minimal Scrollbar */
+/* Recessed Inset Panel / CRT Housing Slot */
+.skeuo-inset {
+  background-color: #0A0C0F;
+  border: 2px solid #161920;
+  border-top-color: #050608;
+  border-left-color: #050608;
+  border-bottom-color: #313745;
+  border-right-color: #313745;
+  box-shadow: 
+    inset 4px 4px 12px rgba(0, 0, 0, 0.95),
+    inset -2px -2px 6px rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+/* Raised Tactile Stenciled Plaque */
+.skeuo-plaque {
+  background: linear-gradient(180deg, #3A4150 0%, #2A2F3A 100%);
+  border: 1px solid #50596B;
+  border-bottom-color: #171A21;
+  box-shadow: 
+    0 2px 4px rgba(0,0,0,0.6),
+    inset 0 1px 0 rgba(255,255,255,0.25);
+  color: #E2E8F0;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* Physical Mechanical Push Button (Brushed Steel / Charcoal) */
+.skeuo-btn {
+  background: linear-gradient(180deg, #444B59 0%, #2C313C 100%);
+  border: 1px solid #5A6375;
+  border-top-color: #6F798C;
+  border-left-color: #6F798C;
+  border-bottom-color: #181B22;
+  border-right-color: #181B22;
+  box-shadow: 
+    0 4px 0 #181B22,
+    0 6px 10px rgba(0,0,0,0.7),
+    inset 0 1px 0 rgba(255,255,255,0.3);
+  color: #E2E8F0;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  transition: all 0.06s ease;
+  cursor: pointer;
+  display: inline-flex;
+  items-center: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.skeuo-btn:hover {
+  background: linear-gradient(180deg, #4E5565 0%, #343946 100%);
+  color: #FFFFFF;
+}
+
+.skeuo-btn:active {
+  transform: translateY(3px);
+  box-shadow: 
+    0 1px 0 #181B22,
+    0 2px 4px rgba(0,0,0,0.8),
+    inset 0 2px 4px rgba(0,0,0,0.8);
+}
+
+/* Primary Heavy-Press Physical Button (Buoyant Orange Accent) */
+.skeuo-btn-orange {
+  background: linear-gradient(180deg, #FF7700 0%, #D95500 100%);
+  border: 1px solid #FF9933;
+  border-top-color: #FFAA55;
+  border-left-color: #FFAA55;
+  border-bottom-color: #882200;
+  border-right-color: #882200;
+  box-shadow: 
+    0 4px 0 #771F00,
+    0 8px 16px rgba(255, 102, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.4);
+  color: #0A0C0F;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.3);
+  transition: all 0.06s ease;
+  cursor: pointer;
+}
+
+.skeuo-btn-orange:hover {
+  background: linear-gradient(180deg, #FF8811 0%, #E65C00 100%);
+  box-shadow: 
+    0 4px 0 #771F00,
+    0 10px 20px rgba(255, 102, 0, 0.6),
+    inset 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
+.skeuo-btn-orange:active {
+  transform: translateY(3px);
+  box-shadow: 
+    0 1px 0 #771F00,
+    0 3px 6px rgba(0,0,0,0.9),
+    inset 0 3px 6px rgba(0, 0, 0, 0.7);
+}
+
+/* 1990s CRT Monitor Frame & Curved Screen Effects */
+.crt-frame {
+  background: #1A1D24;
+  border: 10px solid #282C36;
+  border-top-color: #343A47;
+  border-left-color: #343A47;
+  border-bottom-color: #12141A;
+  border-right-color: #12141A;
+  border-radius: 12px;
+  box-shadow: 
+    0 12px 30px rgba(0, 0, 0, 0.9),
+    inset 0 0 25px rgba(0, 0, 0, 0.95);
+  position: relative;
+  overflow: hidden;
+}
+
+/* CRT Screen Interior with Buoyant Orange Monochrome Scanlines */
+.crt-screen-orange {
+  background-color: #0B0803;
+  color: #FF6600;
+  position: relative;
+  overflow: hidden;
+  box-shadow: inset 0 0 40px rgba(255, 102, 0, 0.15), inset 0 0 15px rgba(0,0,0,0.9);
+}
+
+.crt-scanlines::after {
+  content: " ";
+  display: block;
+  position: absolute;
+  top: 0; left: 0; bottom: 0; right: 0;
+  background: linear-gradient(rgba(18, 14, 8, 0) 50%, rgba(0, 0, 0, 0.45) 50%), linear-gradient(90deg, rgba(255, 102, 0, 0.03), rgba(255, 150, 0, 0.01), rgba(0, 0, 0, 0.03));
+  z-index: 20;
+  background-size: 100% 3px, 6px 100%;
+  pointer-events: none;
+}
+
+/* CRT Text Glow Effects */
+.orange-crt-glow {
+  color: #FF6600;
+  text-shadow: 
+    0 0 4px rgba(255, 102, 0, 0.9),
+    0 0 12px rgba(255, 102, 0, 0.5),
+    0 0 20px rgba(255, 102, 0, 0.2);
+}
+
+.amber-crt-glow {
+  color: #FFB000;
+  text-shadow: 
+    0 0 4px rgba(255, 176, 0, 0.9),
+    0 0 12px rgba(255, 176, 0, 0.4);
+}
+
+/* Simulated Physical Hex Screw Head */
+.hex-screw {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #565E70 0%, #2A2F3B 70%, #151820 100%);
+  border: 1px solid #1A1D24;
+  box-shadow: 1px 1px 2px rgba(0,0,0,0.8), inset 0 1px 1px rgba(255,255,255,0.4);
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.hex-screw::before {
+  content: "";
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 6px; height: 6px;
+  transform: translate(-50%, -50%) rotate(30deg);
+  background: #12141A;
+  clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+  box-shadow: inset 0 0 2px rgba(0,0,0,0.9);
+}
+
+/* Recessed LED Indicators */
+.led-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid #161820;
+  box-shadow: inset 0 1px 3px rgba(0,0,0,0.8);
+  display: inline-block;
+  position: relative;
+}
+
+.led-orange-on {
+  background: radial-gradient(circle at 35% 35%, #FFAA44 0%, #FF6600 60%, #CC4400 100%);
+  box-shadow: 0 0 8px #FF6600, 0 0 16px rgba(255, 102, 0, 0.6), inset 0 1px 2px rgba(255,255,255,0.8);
+}
+
+.led-amber-on {
+  background: radial-gradient(circle at 35% 35%, #FFE066 0%, #FFB000 60%, #CC8800 100%);
+  box-shadow: 0 0 8px #FFB000, 0 0 16px rgba(255, 176, 0, 0.6), inset 0 1px 2px rgba(255,255,255,0.8);
+}
+
+.led-off {
+  background: radial-gradient(circle at 35% 35%, #333844 0%, #1D2028 70%, #0F1116 100%);
+  box-shadow: inset 0 1px 2px rgba(0,0,0,0.9);
+}
+
+/* 80s Style Digital 7-Segment / LED Segment Display */
+.led-segment-display {
+  background-color: #07080B;
+  border: 1px solid #252A34;
+  font-family: 'Courier New', Courier, monospace;
+  color: #FF6600;
+  letter-spacing: 0.15em;
+  text-shadow: 0 0 6px rgba(255, 102, 0, 0.8);
+  box-shadow: inset 0 2px 6px rgba(0,0,0,0.9);
+  padding: 4px 8px;
+  border-radius: 2px;
+}
+
+/* Custom Tactical Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #141414;
+  background: #14171D;
+  border-left: 1px solid #232731;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #333333;
+  background: linear-gradient(180deg, #3A4150 0%, #252A34 100%);
+  border: 1px solid #4B5263;
   border-radius: 2px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #c98a4b;
+  background: #FF6600;
 }
 
-/* Leaflet Neutral Dark Marine Theme */
-.leaflet-container {
-  background: #141414 !important;
-  font-family: inherit;
-  border-radius: 2px;
+/* Radar Sweep Keyframe Animation */
+@keyframes sonar-sweep {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 
-.leaflet-popup-content-wrapper {
-  background: #1f1f1f !important;
-  color: #e2e8f0 !important;
-  border: 1px solid rgba(255, 255, 255, 0.12) !important;
-  border-radius: 2px !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
-}
-
-.leaflet-popup-tip {
-  background: #1f1f1f !important;
+.animate-sonar-sweep {
+  animation: sonar-sweep 4s linear infinite;
+  transform-origin: center center;
 }
