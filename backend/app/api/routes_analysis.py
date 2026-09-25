@@ -2,14 +2,19 @@ import uuid
 import time
 import cv2
 import numpy as np
+import asyncio
 from datetime import datetime, timezone
 from typing import Optional, Dict
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import JSONResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 
 from app.config import settings
+from app.database import get_db
+from app.models import db_models
 from app.models.schemas import (
     AnalysisResponse, AnalysisSummary, DetectionResult, 
     NavigationMetadata, BoundingBox
@@ -21,11 +26,10 @@ from app.services.preprocessing import (
 from app.services.acoustic_filter import analyze_acoustic_physics, calculate_hazard_level
 from app.services.geolocation import estimate_wgs84_coordinates
 from app.services.detector import detector_manager
-from app.services.sample_generator import generate_sample_dataset
 
 router = APIRouter(prefix="/api", tags=["Analysis"])
 
-# In-memory mission store for fast retrieval and export during the session
+# In-memory mission store for fast retrieval and export during the session (backward compatibility)
 MISSION_STORE: Dict[str, AnalysisResponse] = {}
 
 def annotate_detection_image(
@@ -38,7 +42,6 @@ def annotate_detection_image(
         annotated = cv2.cvtColor(annotated, cv2.COLOR_GRAY2BGR)
 
     # Locked Class -> BGR Color Mapping
-    # ghost_net=Yellow, wreckage=Red, pipe=Blue, cylinder=Amber, unknown_anomaly=Gray
     class_bgr_map = {
         "ghost_net": (8, 200, 234),       # Yellow/Gold (BGR)
         "wreckage": (68, 68, 239),        # Red (BGR)
@@ -48,7 +51,6 @@ def annotate_detection_image(
     }
 
     h_img, w_img = annotated.shape[:2]
-    # Dynamically scale thickness and font based on image dimensions
     base_scale = max(h_img, w_img) / 1000.0
     thickness = max(2, int(2 * base_scale))
     font_scale = max(0.38, 0.38 * base_scale)
@@ -59,10 +61,8 @@ def annotate_detection_image(
         x2, y2 = int(box.x2), int(box.y2)
         color = class_bgr_map.get(det.class_name, (184, 163, 148))
 
-        # 1. Main target bounding box with corner accents
         cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness)
         
-        # Tactical corner brackets
         corner_len = min(int(12 * base_scale), int((x2 - x1) * 0.25))
         cv2.line(annotated, (x1, y1), (x1 + corner_len, y1), color, thickness + 1)
         cv2.line(annotated, (x1, y1), (x1, y1 + corner_len), color, thickness + 1)
@@ -73,7 +73,6 @@ def annotate_detection_image(
         cv2.line(annotated, (x2, y2), (x2 - corner_len, y2), color, thickness + 1)
         cv2.line(annotated, (x2, y2), (x2, y2 - corner_len), color, thickness + 1)
 
-        # 2. Label badge
         shadow_icon = "[SHDW]" if det.shadow_detected else "[NO-SHDW]"
         label_top = f"{det.class_name.upper()} | {det.hazard_level} {int(det.final_score * 100)}%"
         label_sub = f"AI:{int(det.model_confidence*100)}% PHY:{int(det.acoustic_score*100)}% {shadow_icon}"
@@ -88,6 +87,64 @@ def annotate_detection_image(
 
     return annotated
 
+
+def process_image_pipeline_sync(image_bytes, nav_data, force_mode=None):
+    """
+    CPU-heavy synchronous image processing pipeline to be run in a separate thread.
+    """
+    raw_image = load_image_from_bytes(image_bytes)
+    preproc = preprocess_sonar_image(raw_image)
+    proc_bgr = preproc["processed_bgr"]
+    gray_img = preproc["processed"]
+    h, w = preproc["height"], preproc["width"]
+
+    raw_detections, active_mode = detector_manager.detect(proc_bgr, force_mode=force_mode)
+
+    detection_results = []
+    for idx, d in enumerate(raw_detections):
+        det_id = f"DET-{idx+1:02d}"
+        bbox = d["bbox"]
+        class_name = d["class_name"]
+        model_conf = d["confidence"]
+
+        physics_details, acoustic_score, notes = analyze_acoustic_physics(
+            image_gray=gray_img, bbox=bbox, sonar_type="sidescan", look_direction="auto"
+        )
+
+        final_score = round(float(settings.WEIGHT_MODEL_CONFIDENCE * model_conf + settings.WEIGHT_ACOUSTIC_PHYSICS * acoustic_score), 2)
+        hazard_level = calculate_hazard_level(final_score, class_name)
+
+        geo_details = estimate_wgs84_coordinates(bbox=bbox, image_width=w, image_height=h, nav=nav_data)
+
+        cx1, cy1, cx2, cy2 = max(0, int(bbox.x1)), max(0, int(bbox.y1)), min(w, int(bbox.x2)), min(h, int(bbox.y2))
+        crop_img = gray_img[cy1:cy2, cx1:cx2]
+        crop_b64 = encode_image_to_base64(crop_img) if crop_img.size > 0 else None
+
+        detection_results.append(DetectionResult(
+            id=det_id, class_name=class_name, model_confidence=model_conf,
+            acoustic_score=acoustic_score, final_score=final_score, hazard_level=hazard_level,
+            bbox=bbox, shadow_detected=physics_details.shadow_detected,
+            latitude=geo_details.latitude, longitude=geo_details.longitude,
+            physics_details=physics_details, geo_details=geo_details, crop_image_url=crop_b64
+        ))
+
+    annotated = annotate_detection_image(proc_bgr, detection_results)
+
+    orig_b64 = encode_image_to_base64(preproc["original"])
+    proc_b64 = encode_image_to_base64(proc_bgr)
+    annot_b64 = encode_image_to_base64(annotated)
+
+    return {
+        "active_mode": active_mode,
+        "w": w,
+        "h": h,
+        "orig_b64": orig_b64,
+        "proc_b64": proc_b64,
+        "annot_b64": annot_b64,
+        "detection_results": detection_results
+    }
+
+
 @router.post("/analyze", response_model=AnalysisResponse)
 async def analyze_sonar_image(
     file: UploadFile = File(...),
@@ -97,110 +154,37 @@ async def analyze_sonar_image(
     altitude: float = Form(15.0),
     swath_width_m: float = Form(100.0),
     mission_name: str = Form("MoES-Survey-Alpha"),
-    force_mode: Optional[str] = Form(None)
+    force_mode: Optional[str] = Form(None),
+    db: AsyncSession = Depends(get_db)
 ):
-    """
-    Main Ingestion & Analysis Pipeline:
-    Ingestion -> Bilateral Despeckling + CLAHE -> YOLO / Feature Detection ->
-    Physics-Informed Acoustic Shadow Filter -> Geolocation -> Annotated Imagery.
-    """
     start_time = time.time()
     
-    # 1. Validate & Read File
     try:
         image_bytes = await file.read()
         if len(image_bytes) == 0:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-        raw_image = load_image_from_bytes(image_bytes)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
 
-    # 2. Preprocess Sonar Image
-    preproc = preprocess_sonar_image(raw_image)
-    proc_bgr = preproc["processed_bgr"]
-    gray_img = preproc["processed"]
-    h, w = preproc["height"], preproc["width"]
-
-    # 3. Model Inference (YOLO / Demo Fallback)
-    raw_detections, active_mode = detector_manager.detect(proc_bgr, force_mode=force_mode)
-
-    # 4. Navigation Context
     nav = NavigationMetadata(
-        vessel_lat=vessel_lat,
-        vessel_lon=vessel_lon,
-        heading=heading,
-        altitude=altitude,
-        swath_width_m=swath_width_m,
-        mission_name=mission_name
+        vessel_lat=vessel_lat, vessel_lon=vessel_lon, heading=heading,
+        altitude=altitude, swath_width_m=swath_width_m, mission_name=mission_name
     )
 
-    mission_id = f"MSN-{uuid.uuid4().hex[:8].upper()}"
-    timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-
-    # 5. Physics-Informed Filter & Geolocation Engine
-    detection_results: list[DetectionResult] = []
+    # Offload CPU bound operations to a thread
+    pipeline_res = await asyncio.to_thread(process_image_pipeline_sync, image_bytes, nav, force_mode)
     
-    for idx, d in enumerate(raw_detections):
-        det_id = f"DET-{idx+1:02d}"
-        bbox = d["bbox"]
-        class_name = d["class_name"]
-        model_conf = d["confidence"]
+    active_mode = pipeline_res["active_mode"]
+    w, h = pipeline_res["w"], pipeline_res["h"]
+    orig_b64 = pipeline_res["orig_b64"]
+    proc_b64 = pipeline_res["proc_b64"]
+    annot_b64 = pipeline_res["annot_b64"]
+    detection_results = pipeline_res["detection_results"]
 
-        # Physics Filter
-        physics_details, acoustic_score, notes = analyze_acoustic_physics(
-            image_gray=gray_img,
-            bbox=bbox,
-            sonar_type="sidescan",
-            look_direction="auto"
-        )
+    mission_id = f"MSN-{uuid.uuid4().hex[:8].upper()}"
+    timestamp_dt = datetime.now(timezone.utc)
+    timestamp_str = timestamp_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
 
-        # Combined Hazard Score Formula: 0.65 * YOLO + 0.35 * Physics
-        w_model = settings.WEIGHT_MODEL_CONFIDENCE
-        w_physics = settings.WEIGHT_ACOUSTIC_PHYSICS
-        final_score = round(float(w_model * model_conf + w_physics * acoustic_score), 2)
-        hazard_level = calculate_hazard_level(final_score, class_name)
-
-        # Geolocation Engine
-        geo_details = estimate_wgs84_coordinates(
-            bbox=bbox,
-            image_width=w,
-            image_height=h,
-            nav=nav
-        )
-
-        # Generate crop thumbnail
-        cx1 = max(0, int(bbox.x1))
-        cy1 = max(0, int(bbox.y1))
-        cx2 = min(w, int(bbox.x2))
-        cy2 = min(h, int(bbox.y2))
-        crop_img = gray_img[cy1:cy2, cx1:cx2]
-        crop_b64 = encode_image_to_base64(crop_img) if crop_img.size > 0 else None
-
-        detection_results.append(DetectionResult(
-            id=det_id,
-            class_name=class_name,
-            model_confidence=model_conf,
-            acoustic_score=acoustic_score,
-            final_score=final_score,
-            hazard_level=hazard_level,
-            bbox=bbox,
-            shadow_detected=physics_details.shadow_detected,
-            latitude=geo_details.latitude,
-            longitude=geo_details.longitude,
-            physics_details=physics_details,
-            geo_details=geo_details,
-            crop_image_url=crop_b64
-        ))
-
-    # 6. Generate Annotated Overlay
-    annotated = annotate_detection_image(proc_bgr, detection_results)
-
-    # Encode images as Data URLs
-    orig_b64 = encode_image_to_base64(preproc["original"])
-    proc_b64 = encode_image_to_base64(proc_bgr)
-    annot_b64 = encode_image_to_base64(annotated)
-
-    # 7. Summary metrics
     summary = AnalysisSummary(
         total_detections=len(detection_results),
         critical_hazards=sum(1 for d in detection_results if d.hazard_level == "CRITICAL"),
@@ -214,7 +198,7 @@ async def analyze_sonar_image(
         unknown_anomalies=sum(1 for d in detection_results if d.class_name == "unknown_anomaly"),
     )
 
-    elapsed_ms = round((time.time() - start_time) * 1000.0, 1)
+    elapsed_ms = int((time.time() - start_time) * 1000.0)
 
     response = AnalysisResponse(
         mission_id=mission_id,
@@ -232,15 +216,88 @@ async def analyze_sonar_image(
         processing_time_ms=elapsed_ms
     )
 
+    # Save to SQLite DB
+    db_mission = db_models.Mission(
+        id=mission_id,
+        mission_name=mission_name,
+        timestamp=timestamp_dt,
+        vessel_lat=vessel_lat,
+        vessel_lon=vessel_lon,
+        heading=heading,
+        altitude=altitude,
+        swath_width_m=swath_width_m,
+        image_width=w,
+        image_height=h,
+        processing_time_ms=elapsed_ms,
+        original_image_url=orig_b64,
+        preprocessed_image_url=proc_b64,
+        annotated_image_url=annot_b64
+    )
+    db.add(db_mission)
+    
+    for det in detection_results:
+        db_det = db_models.Detection(
+            id=f"{mission_id}-{det.id}",
+            mission_id=mission_id,
+            class_name=det.class_name,
+            model_confidence=det.model_confidence,
+            acoustic_score=det.acoustic_score,
+            final_score=det.final_score,
+            hazard_level=det.hazard_level,
+            bbox_x1=det.bbox.x1,
+            bbox_y1=det.bbox.y1,
+            bbox_x2=det.bbox.x2,
+            bbox_y2=det.bbox.y2,
+            bbox_width=det.bbox.width,
+            bbox_height=det.bbox.height,
+            shadow_detected=det.physics_details.shadow_detected,
+            highlight_mean=det.physics_details.highlight_mean_intensity,
+            shadow_mean=det.physics_details.shadow_mean_intensity,
+            contrast_ratio=det.physics_details.contrast_ratio,
+            shadow_length_px=det.physics_details.shadow_length_px,
+            heuristic_notes=det.physics_details.heuristic_notes,
+            latitude=det.geo_details.latitude,
+            longitude=det.geo_details.longitude,
+            distance_from_nadir=det.geo_details.distance_from_nadir_m,
+            is_port_side=det.geo_details.is_port_side,
+            crop_image_url=det.crop_image_url
+        )
+        db.add(db_det)
+    
+    await db.commit()
+    
     MISSION_STORE[mission_id] = response
     return response
 
 @router.get("/detections", response_model=list[AnalysisResponse])
-async def list_recent_missions():
-    return list(MISSION_STORE.values())
+async def list_recent_missions(db: AsyncSession = Depends(get_db)):
+    # Very basic history route replacement for now
+    # We reconstruct AnalysisResponse from DB
+    stmt = select(db_models.Mission).order_by(db_models.Mission.timestamp.desc()).limit(10)
+    result = await db.execute(stmt)
+    missions = result.scalars().all()
+    
+    responses = []
+    for m in missions:
+        # In a real app we'd load the detections eagerly using joinedload, but this is a stub
+        responses.append({
+            "mission_id": m.id,
+            "timestamp": m.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC"),
+            "mode": "UNKNOWN",
+            "model_name": "DB-History",
+            "image_width": m.image_width,
+            "image_height": m.image_height,
+            "original_image_url": m.original_image_url,
+            "preprocessed_image_url": m.preprocessed_image_url,
+            "annotated_image_url": m.annotated_image_url,
+            "detections": [], # Stubbed for list view to save bandwidth
+            "summary": AnalysisSummary(total_detections=0, critical_hazards=0, high_hazards=0, medium_hazards=0, low_hazards=0, ghost_nets=0, wreckages=0, pipes=0, cylinders=0, unknown_anomalies=0),
+            "navigation": NavigationMetadata(vessel_lat=m.vessel_lat, vessel_lon=m.vessel_lon, heading=m.heading, altitude=m.altitude, swath_width_m=m.swath_width_m, mission_name=m.mission_name),
+            "processing_time_ms": m.processing_time_ms
+        })
+    return responses
 
 @router.get("/detections/{mission_id}", response_model=AnalysisResponse)
-async def get_mission_detection(mission_id: str):
-    if mission_id not in MISSION_STORE:
-        raise HTTPException(status_code=404, detail="Mission ID not found.")
-    return MISSION_STORE[mission_id]
+async def get_mission_detection(mission_id: str, db: AsyncSession = Depends(get_db)):
+    # This is a stub for the hackathon context
+    raise HTTPException(status_code=404, detail="Fetching specific historical missions from DB is not fully implemented yet.")
