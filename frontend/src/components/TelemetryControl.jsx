@@ -76,7 +76,7 @@ export default function TelemetryControl({
             <img
               src={previewUrl}
               alt="Sonar Preview"
-              className="w-18 h-18 object-cover rounded-[2px] border border-white/15 bg-black"
+              className="w-20 h-20 object-cover rounded-[2px] border border-white/15 bg-black"
             />
 
             <div className="flex-1 text-left">

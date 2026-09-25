@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     
     # Paths
     BASE_DIR: Path = BASE_DIR
-    MODEL_PATH: Path = BASE_DIR / "models" / "sonarsentinel.pt"
+    MODEL_PATH: Path = BASE_DIR / "models" / "sonarsentinel.onnx"
     ONNX_MODEL_PATH: Path = BASE_DIR / "models" / "sonarsentinel.onnx"
     UPLOAD_DIR: Path = BASE_DIR / "data" / "uploads"
     REPORT_DIR: Path = BASE_DIR / "data" / "reports"

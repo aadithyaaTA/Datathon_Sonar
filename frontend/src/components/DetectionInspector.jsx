@@ -144,12 +144,12 @@ export default function DetectionInspector({ detection, vesselPos }) {
                   <ShieldCheck className="w-4 h-4 text-[#4b7bc9]" />
                   Acoustic Physics Score:
                 </span>
-                <span className="font-extrabold text-[#4b7bc9]">{Math.round(acoustic_score * 100)}%</span>
+                <span className="font-extrabold text-[#4b7bc9]">{Math.round((acoustic_score ?? physics_details?.acoustic_score ?? 0) * 100)}%</span>
               </div>
               <div className="w-full bg-[#141414] rounded-[2px] h-2.5 overflow-hidden border border-white/10">
                 <div
                   className="bg-[#4b7bc9] h-full rounded-[1px] transition-all duration-300"
-                  style={{ width: `${Math.round(acoustic_score * 100)}%` }}
+                  style={{ width: `${Math.round((acoustic_score ?? physics_details?.acoustic_score ?? 0) * 100)}%` }}
                 />
               </div>
             </div>

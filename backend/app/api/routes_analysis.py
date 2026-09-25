@@ -47,6 +47,12 @@ def annotate_detection_image(
         "unknown_anomaly": (184, 163, 148)# Slate Gray (BGR)
     }
 
+    h_img, w_img = annotated.shape[:2]
+    # Dynamically scale thickness and font based on image dimensions
+    base_scale = max(h_img, w_img) / 1000.0
+    thickness = max(2, int(2 * base_scale))
+    font_scale = max(0.38, 0.38 * base_scale)
+
     for det in detections:
         box = det.bbox
         x1, y1 = int(box.x1), int(box.y1)
@@ -54,31 +60,31 @@ def annotate_detection_image(
         color = class_bgr_map.get(det.class_name, (184, 163, 148))
 
         # 1. Main target bounding box with corner accents
-        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness)
         
         # Tactical corner brackets
-        corner_len = min(12, int((x2 - x1) * 0.25))
-        cv2.line(annotated, (x1, y1), (x1 + corner_len, y1), color, 3)
-        cv2.line(annotated, (x1, y1), (x1, y1 + corner_len), color, 3)
-        cv2.line(annotated, (x2, y1), (x2 - corner_len, y1), color, 3)
-        cv2.line(annotated, (x2, y1), (x2, y1 + corner_len), color, 3)
-        cv2.line(annotated, (x1, y2), (x1 + corner_len, y2), color, 3)
-        cv2.line(annotated, (x1, y2), (x1, y2 - corner_len), color, 3)
-        cv2.line(annotated, (x2, y2), (x2 - corner_len, y2), color, 3)
-        cv2.line(annotated, (x2, y2), (x2 - corner_len, y2), color, 3)
+        corner_len = min(int(12 * base_scale), int((x2 - x1) * 0.25))
+        cv2.line(annotated, (x1, y1), (x1 + corner_len, y1), color, thickness + 1)
+        cv2.line(annotated, (x1, y1), (x1, y1 + corner_len), color, thickness + 1)
+        cv2.line(annotated, (x2, y1), (x2 - corner_len, y1), color, thickness + 1)
+        cv2.line(annotated, (x2, y1), (x2, y1 + corner_len), color, thickness + 1)
+        cv2.line(annotated, (x1, y2), (x1 + corner_len, y2), color, thickness + 1)
+        cv2.line(annotated, (x1, y2), (x1, y2 - corner_len), color, thickness + 1)
+        cv2.line(annotated, (x2, y2), (x2 - corner_len, y2), color, thickness + 1)
+        cv2.line(annotated, (x2, y2), (x2, y2 - corner_len), color, thickness + 1)
 
         # 2. Label badge
         shadow_icon = "[SHDW]" if det.shadow_detected else "[NO-SHDW]"
         label_top = f"{det.class_name.upper()} | {det.hazard_level} {int(det.final_score * 100)}%"
         label_sub = f"AI:{int(det.model_confidence*100)}% PHY:{int(det.acoustic_score*100)}% {shadow_icon}"
         
-        (tw, th), _ = cv2.getTextSize(label_top, cv2.FONT_HERSHEY_SIMPLEX, 0.42, 1)
-        badge_y1 = max(0, y1 - 32)
-        cv2.rectangle(annotated, (x1, badge_y1), (x1 + max(tw + 12, 195), y1), (12, 16, 24), -1)
-        cv2.rectangle(annotated, (x1, badge_y1), (x1 + max(tw + 12, 195), y1), color, 1)
+        (tw, th), _ = cv2.getTextSize(label_top, cv2.FONT_HERSHEY_SIMPLEX, font_scale * 1.1, thickness)
+        badge_y1 = max(0, y1 - int(32 * base_scale))
+        cv2.rectangle(annotated, (x1, badge_y1), (x1 + max(tw + int(12 * base_scale), int(195 * base_scale)), y1), (12, 16, 24), -1)
+        cv2.rectangle(annotated, (x1, badge_y1), (x1 + max(tw + int(12 * base_scale), int(195 * base_scale)), y1), color, max(1, thickness - 1))
         
-        cv2.putText(annotated, label_top, (x1 + 4, badge_y1 + 13), cv2.FONT_HERSHEY_SIMPLEX, 0.38, color, 1, cv2.LINE_AA)
-        cv2.putText(annotated, label_sub, (x1 + 4, badge_y1 + 26), cv2.FONT_HERSHEY_SIMPLEX, 0.34, (200, 200, 200), 1, cv2.LINE_AA)
+        cv2.putText(annotated, label_top, (x1 + int(4 * base_scale), badge_y1 + int(13 * base_scale)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, color, max(1, thickness - 1), cv2.LINE_AA)
+        cv2.putText(annotated, label_sub, (x1 + int(4 * base_scale), badge_y1 + int(26 * base_scale)), cv2.FONT_HERSHEY_SIMPLEX, font_scale * 0.9, (200, 200, 200), max(1, thickness - 1), cv2.LINE_AA)
 
     return annotated
 
