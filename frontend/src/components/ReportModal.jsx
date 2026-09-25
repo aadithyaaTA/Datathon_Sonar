@@ -2,8 +2,13 @@ import React from 'react';
 import { X, Download, FileJson, FileSpreadsheet, Globe, Shield, CheckCircle2 } from 'lucide-react';
 import { getReportDownloadUrl } from '../services/api';
 import { getClassColor } from '../services/colors';
+import { useSonarContext } from '../context/SonarContext';
 
-export default function ReportModal({ isOpen, onClose, analysisResult }) {
+export default function ReportModal({ onClose }) {
+  const { state } = useSonarContext();
+  const isOpen = state.isReportModalOpen;
+  const analysisResult = state.analysisResult;
+
   if (!isOpen || !analysisResult) return null;
 
   const {

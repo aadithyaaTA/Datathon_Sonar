@@ -4,17 +4,17 @@ import {
   Play, RefreshCw, CheckCircle2 
 } from 'lucide-react';
 import { playSonarPing } from '../services/audio';
+import { useSonarContext } from '../context/SonarContext';
 
 export default function TelemetryControl({
-  file,
-  previewUrl,
-  telemetry,
-  isAnalyzing,
   onFileChange,
   onTelemetryChange,
   onAnalyze,
   onReset
 }) {
+  const { state } = useSonarContext();
+  const { file, previewUrl, telemetry, isAnalyzing } = state;
+
   const handleInputChange = (field, value) => {
     onTelemetryChange({
       ...telemetry,
@@ -215,7 +215,7 @@ export default function TelemetryControl({
         </div>
       </div>
 
-      {/* Main Execution Button (Flat, Sharp 2px Corners, Muted Copper) */}
+      {/* Main Execution Button */}
       <button
         onClick={handleRunClick}
         disabled={isAnalyzing || (!file && !previewUrl)}

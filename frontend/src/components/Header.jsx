@@ -3,8 +3,11 @@ import {
   Radio, Cpu, FileText, 
   Clock, Satellite, LayoutDashboard, ArrowLeft 
 } from 'lucide-react';
+import { useSonarContext } from '../context/SonarContext';
 
-export default function Header({ systemHealth, analysisResult, onOpenReport, onReturnToLanding }) {
+export default function Header({ onOpenReport, onReturnToLanding }) {
+  const { state } = useSonarContext();
+  const { systemHealth, analysisResult } = state;
   const [utcTime, setUtcTime] = useState('');
 
   useEffect(() => {

@@ -1,8 +1,12 @@
 import React from 'react';
 import { Compass, Zap, MapPin, Waves, ChevronRight } from 'lucide-react';
 import { CLASS_COLORS, getClassColor } from '../services/colors';
+import { useSonarContext } from '../context/SonarContext';
 
-export default function PresetSelector({ presets, selectedPreset, onSelectPreset, disabled }) {
+export default function PresetSelector({ onSelectPreset }) {
+  const { state } = useSonarContext();
+  const { presets, selectedPreset, isAnalyzing } = state;
+
   if (!presets || presets.length === 0) return null;
 
   const current = selectedPreset || presets[0];
@@ -11,7 +15,7 @@ export default function PresetSelector({ presets, selectedPreset, onSelectPreset
 
   return (
     <div className="bg-[#1f1f1f] border border-white/08 rounded-[2px] p-4 mb-4">
-      {/* Section Header: Visibly larger and bolder */}
+      {/* Section Header */}
       <div className="flex items-center justify-between mb-3.5 pb-2.5 border-b border-white/08">
         <div className="flex items-center gap-2 text-[18px] font-mono font-bold text-white tracking-wide">
           <div className="p-1.5 rounded-[2px] bg-[#141414] border border-white/10 text-[#c98a4b]">
@@ -96,7 +100,7 @@ export default function PresetSelector({ presets, selectedPreset, onSelectPreset
               <button
                 key={preset.id}
                 onClick={() => onSelectPreset(preset)}
-                disabled={disabled}
+                disabled={isAnalyzing}
                 className="group flex items-center justify-between p-3 rounded-[2px] bg-[#181818] border border-white/08 hover:border-white/20 hover:bg-[#222222] transition-colors text-left font-mono text-[13px] cursor-pointer"
               >
                 <div className="flex items-center gap-2.5 truncate">

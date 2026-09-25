@@ -1,8 +1,16 @@
 import React from 'react';
 import { Target, AlertTriangle, ShieldAlert, Waves } from 'lucide-react';
 import { CLASS_COLORS } from '../services/colors';
+import { useSonarContext } from '../context/SonarContext';
 
-export default function MetricCards({ summary, processingTimeMs, missionId }) {
+export default function MetricCards() {
+  const { state } = useSonarContext();
+  const analysisResult = state.analysisResult;
+
+  const summary = analysisResult?.summary;
+  const processingTimeMs = analysisResult?.processing_time_ms;
+  const missionId = analysisResult?.mission_id;
+
   const s = summary || {
     total_detections: 0,
     critical_hazards: 0,
@@ -57,7 +65,7 @@ export default function MetricCards({ summary, processingTimeMs, missionId }) {
 
   return (
     <div className="relative bathymetric-watermark rounded-[2px] overflow-hidden">
-      {/* SVG Nautical Isobath Contour Lines Watermark (< 2.5% opacity) */}
+      {/* SVG Nautical Isobath Contour Lines Watermark */}
       <svg
         className="absolute inset-0 w-full h-full pointer-events-none opacity-[0.025] text-white"
         viewBox="0 0 1000 200"

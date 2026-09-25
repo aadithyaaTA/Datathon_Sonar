@@ -3,13 +3,12 @@ import {
   Eye, Layers, ZoomIn, ZoomOut, Sliders, Scan, Crosshair, Palette 
 } from 'lucide-react';
 import { CLASS_COLORS, getClassColor } from '../services/colors';
+import { useSonarContext } from '../context/SonarContext';
 
-export default function SonarViewer({
-  analysisResult,
-  selectedDetection,
-  onSelectDetection,
-  isAnalyzing
-}) {
+export default function SonarViewer({ onSelectDetection }) {
+  const { state } = useSonarContext();
+  const { analysisResult, selectedDetection, isAnalyzing } = state;
+
   const [viewMode, setViewMode] = useState('annotated'); // 'annotated' | 'preprocessed' | 'original'
   const [colorPalette, setColorPalette] = useState('standard'); // 'standard' | 'copper' | 'marine' | 'thermal'
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -99,12 +98,11 @@ export default function SonarViewer({
       ? analysisResult.preprocessed_image_url
       : analysisResult.original_image_url;
 
-  // Depth / along-track waterfall ticks every 15 meters
   const depthTicks = [0, 15, 30, 45, 60];
 
   return (
     <div className="bg-[#1f1f1f] border border-white/08 rounded-[2px] overflow-hidden flex flex-col">
-      {/* Top Bar: Visibly larger header */}
+      {/* Top Bar */}
       <div className="p-3 bg-[#141414] border-b border-white/08 flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2.5">
           <span className="text-[18px] font-mono font-bold text-white tracking-wide">
@@ -190,15 +188,13 @@ export default function SonarViewer({
         </div>
       </div>
 
-      {/* Main Interactive Stage with Vertical Depth/Range Waterfall Ruler */}
+      {/* Main Interactive Stage */}
       <div className="relative bg-black flex min-h-[400px] select-none overflow-hidden group">
-        {/* Real Vertical Range / Depth Ruler Along Left Edge (Ticks every 15m) */}
         <div className="w-13 bg-[#141414] border-r border-white/08 flex flex-col justify-between py-6 px-1.5 text-[11px] font-mono text-slate-400 z-20 select-none">
           {depthTicks.map((tick, idx) => (
             <div key={idx} className="flex items-center justify-between relative">
               <span className="text-[#c98a4b] font-bold">{tick}m</span>
               <div className="w-2.5 h-[1px] bg-white/20"></div>
-              {/* Minor subtick */}
               {idx < depthTicks.length - 1 && (
                 <div className="absolute top-[50%] right-0 w-1.5 h-[1px] bg-white/10"></div>
               )}
@@ -206,13 +202,11 @@ export default function SonarViewer({
           ))}
         </div>
 
-        {/* Viewport Canvas Container */}
         <div 
           ref={containerRef}
           onMouseMove={handleMouseMove}
           className="flex-1 relative flex items-center justify-center p-2 cursor-crosshair overflow-hidden"
         >
-          {/* Top Lateral Scale Ruler (Port / Nadir / Starboard) */}
           <div className="absolute top-2 left-3 right-3 z-20 flex items-center justify-between pointer-events-none text-[12px] font-mono">
             <span className="px-2.5 py-0.5 rounded-[2px] bg-[#141414]/90 border border-white/10 text-slate-300">
               PORT (-{halfSwath}m)
@@ -225,7 +219,6 @@ export default function SonarViewer({
             </span>
           </div>
 
-          {/* Live Hover Readout */}
           <div className="absolute bottom-2 left-3 z-20 pointer-events-none flex items-center gap-3 text-[12px] font-mono bg-[#141414]/90 border border-white/10 px-2.5 py-1 rounded-[2px] text-slate-300">
             <span>X: <strong className="text-white">{cursorPos.x}px</strong></span>
             <span>Y: <strong className="text-white">{cursorPos.y}px</strong></span>
@@ -233,7 +226,6 @@ export default function SonarViewer({
             <span>Along-Track: <strong className="text-slate-200">{cursorPos.alongM}m</strong></span>
           </div>
 
-          {/* Zoom Controls */}
           <div className="absolute bottom-2 right-3 z-20 flex items-center gap-1.5 bg-[#141414]/90 border border-white/10 p-1 rounded-[2px]">
             <button
               onClick={() => setZoomLevel((z) => Math.min(2.5, z + 0.25))}
@@ -258,7 +250,6 @@ export default function SonarViewer({
             </button>
           </div>
 
-          {/* Rendered Sonar Image */}
           <div 
             className="transition-transform duration-150 ease-out w-full flex items-center justify-center"
             style={{ transform: `scale(${zoomLevel})` }}

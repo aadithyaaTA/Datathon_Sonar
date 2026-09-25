@@ -2,6 +2,7 @@ import uuid
 import time
 import cv2
 import numpy as np
+from starlette.concurrency import run_in_threadpool
 from datetime import datetime, timezone
 from typing import Optional, Dict
 from pathlib import Path
@@ -88,33 +89,7 @@ def annotate_detection_image(
 
     return annotated
 
-@router.post("/analyze", response_model=AnalysisResponse)
-async def analyze_sonar_image(
-    file: UploadFile = File(...),
-    vessel_lat: float = Form(13.0827),
-    vessel_lon: float = Form(80.2707),
-    heading: float = Form(90.0),
-    altitude: float = Form(15.0),
-    swath_width_m: float = Form(100.0),
-    mission_name: str = Form("MoES-Survey-Alpha"),
-    force_mode: Optional[str] = Form(None)
-):
-    """
-    Main Ingestion & Analysis Pipeline:
-    Ingestion -> Bilateral Despeckling + CLAHE -> YOLO / Feature Detection ->
-    Physics-Informed Acoustic Shadow Filter -> Geolocation -> Annotated Imagery.
-    """
-    start_time = time.time()
-    
-    # 1. Validate & Read File
-    try:
-        image_bytes = await file.read()
-        if len(image_bytes) == 0:
-            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
-        raw_image = load_image_from_bytes(image_bytes)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
-
+def _run_pipeline(raw_image: np.ndarray, nav: NavigationMetadata, force_mode: Optional[str]):
     # 2. Preprocess Sonar Image
     preproc = preprocess_sonar_image(raw_image)
     proc_bgr = preproc["processed_bgr"]
@@ -123,19 +98,6 @@ async def analyze_sonar_image(
 
     # 3. Model Inference (YOLO / Demo Fallback)
     raw_detections, active_mode = detector_manager.detect(proc_bgr, force_mode=force_mode)
-
-    # 4. Navigation Context
-    nav = NavigationMetadata(
-        vessel_lat=vessel_lat,
-        vessel_lon=vessel_lon,
-        heading=heading,
-        altitude=altitude,
-        swath_width_m=swath_width_m,
-        mission_name=mission_name
-    )
-
-    mission_id = f"MSN-{uuid.uuid4().hex[:8].upper()}"
-    timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     # 5. Physics-Informed Filter & Geolocation Engine
     detection_results: list[DetectionResult] = []
@@ -199,6 +161,53 @@ async def analyze_sonar_image(
     orig_b64 = encode_image_to_base64(preproc["original"])
     proc_b64 = encode_image_to_base64(proc_bgr)
     annot_b64 = encode_image_to_base64(annotated)
+
+    return w, h, active_mode, detection_results, orig_b64, proc_b64, annot_b64
+
+@router.post("/analyze", response_model=AnalysisResponse)
+async def analyze_sonar_image(
+    file: UploadFile = File(...),
+    vessel_lat: float = Form(13.0827),
+    vessel_lon: float = Form(80.2707),
+    heading: float = Form(90.0),
+    altitude: float = Form(15.0),
+    swath_width_m: float = Form(100.0),
+    mission_name: str = Form("MoES-Survey-Alpha"),
+    force_mode: Optional[str] = Form(None)
+):
+    """
+    Main Ingestion & Analysis Pipeline:
+    Ingestion -> Bilateral Despeckling + CLAHE -> YOLO / Feature Detection ->
+    Physics-Informed Acoustic Shadow Filter -> Geolocation -> Annotated Imagery.
+    """
+    start_time = time.time()
+    
+    # 1. Validate & Read File
+    try:
+        image_bytes = await file.read()
+        if len(image_bytes) == 0:
+            raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        raw_image = load_image_from_bytes(image_bytes)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
+
+    # 2. Navigation Context
+    nav = NavigationMetadata(
+        vessel_lat=vessel_lat,
+        vessel_lon=vessel_lon,
+        heading=heading,
+        altitude=altitude,
+        swath_width_m=swath_width_m,
+        mission_name=mission_name
+    )
+
+    # 3. Threadpool Pipeline
+    w, h, active_mode, detection_results, orig_b64, proc_b64, annot_b64 = await run_in_threadpool(
+        _run_pipeline, raw_image, nav, force_mode
+    )
+
+    mission_id = f"MSN-{uuid.uuid4().hex[:8].upper()}"
+    timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
     # 7. Summary metrics
     summary = AnalysisSummary(
