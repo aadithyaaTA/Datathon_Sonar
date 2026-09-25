@@ -1,0 +1,4 @@
+# Step 2 — Model-Loading Service
+# Additional dependency on top of the main requirements.txt
+
+onnxruntime>=1.17.0

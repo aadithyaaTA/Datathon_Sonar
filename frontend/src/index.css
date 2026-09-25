@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-[#141414] text-[#E0E0E0] font-sans;
+    background-color: #141414;
+    min-height: 100vh;
+    overflow-x: hidden;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+}
+
+/* Neutral Graphite / Charcoal Instrument Panels (Zero Blue Tint, Sharp 2px Corners) */
+.instrument-panel {
+  background-color: #1f1f1f;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+}
+
+.instrument-card {
+  background-color: #242424;
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 2px;
+}
+
+.instrument-card:hover {
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.instrument-inset {
+  background-color: #181818;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+}
+
+/* Faint Neutral Bathymetric Chart Watermark (< 2.5% Opacity) */
+.bathymetric-watermark {
+  position: relative;
+}
+.bathymetric-watermark::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='300' viewBox='0 0 600 300'%3E%3Cpath d='M0,50 Q150,90 300,40 T600,60 M0,100 Q180,140 320,90 T600,120 M0,160 Q140,210 290,150 T600,180 M0,220 Q200,260 350,210 T600,240 M0,270 Q160,295 310,260 T600,285' fill='none' stroke='%23ffffff' stroke-width='1.0' stroke-dasharray='4,6'/%3E%3Cpath d='M0,75 Q120,40 270,70 T600,90 M0,135 Q190,170 340,120 T600,150 M0,195 Q130,240 280,180 T600,210 M0,250 Q220,280 370,230 T600,265' fill='none' stroke='%23ffffff' stroke-width='0.7'/%3E%3C/svg%3E");
+  background-size: 500px 250px;
+  opacity: 0.025;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* Custom Minimal Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #141414;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #333333;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #c98a4b;
+}
+
+/* Leaflet Neutral Dark Marine Theme */
+.leaflet-container {
+  background: #141414 !important;
+  font-family: inherit;
+  border-radius: 2px;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #1f1f1f !important;
+  color: #e2e8f0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.12) !important;
+  border-radius: 2px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.6) !important;
+}
+
+.leaflet-popup-tip {
+  background: #1f1f1f !important;
+}
