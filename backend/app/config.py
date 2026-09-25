@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "SonarSentinel API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
+    CORS_ORIGINS: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
     
     # Paths
     BASE_DIR: Path = BASE_DIR

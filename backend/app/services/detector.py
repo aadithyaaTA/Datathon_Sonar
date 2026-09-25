@@ -1,4 +1,4 @@
-import logging
+from loguru import logger
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
@@ -7,8 +7,6 @@ import cv2
 
 from app.config import settings
 from app.models.schemas import BoundingBox
-
-logger = logging.getLogger("sonarsentinel.detector")
 
 class BaseDetector:
     """Abstract interface for Sonar Anomaly Detectors."""
@@ -21,7 +19,6 @@ class YOLOv8SonarDetector(BaseDetector):
         self.model_path = model_path
         self.model = None
         self.loaded = False
-        self._load_model()
 
     def _load_model(self):
         if not self.model_path.exists():
@@ -171,6 +168,14 @@ class DetectorManager:
     def __init__(self):
         self.yolo_detector = YOLOv8SonarDetector(settings.MODEL_PATH)
         self.demo_detector = DemoDetector()
+        
+    def load_models_sync(self):
+        if not self.yolo_detector.loaded:
+            self.yolo_detector._load_model()
+            
+    async def load_models(self):
+        from starlette.concurrency import run_in_threadpool
+        await run_in_threadpool(self.load_models_sync)
         
     @property
     def is_ai_loaded(self) -> bool:

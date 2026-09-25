@@ -4,6 +4,7 @@ import L from 'leaflet';
 import { Compass, Navigation2, Crosshair, MapPin } from 'lucide-react';
 import { CLASS_COLORS, getClassColor } from '../services/colors';
 import { playTargetClick } from '../services/audio';
+import { useSonarContext } from '../context/SonarContext';
 
 function createCustomIcon(color, isVessel = false, heading = 0) {
   if (isVessel) {
@@ -48,12 +49,13 @@ function MapViewController({ center, zoom, bounds }) {
   return null;
 }
 
-export default function MaritimeMap({
-  vesselNav,
-  detections,
-  selectedDetection,
-  onSelectDetection,
-}) {
+export default function MaritimeMap({ onSelectDetection }) {
+  const { state } = useSonarContext();
+  const { telemetry, analysisResult, selectedDetection } = state;
+
+  const vesselNav = analysisResult ? analysisResult.navigation : telemetry;
+  const detections = analysisResult?.detections || [];
+
   const defaultCenter = [vesselNav?.vessel_lat || 13.0827, vesselNav?.vessel_lon || 80.2707];
   const heading = vesselNav?.heading || 90;
 
@@ -72,7 +74,7 @@ export default function MaritimeMap({
 
   return (
     <div className="bg-[#1f1f1f] border border-white/08 rounded-[2px] p-4 flex flex-col gap-3">
-      {/* Header: Visibly larger and bolder */}
+      {/* Header */}
       <div className="flex items-center justify-between pb-2.5 border-b border-white/08">
         <div className="flex items-center gap-2 text-[18px] font-mono font-bold text-white tracking-wide">
           <div className="p-1.5 rounded-[2px] bg-[#141414] border border-white/10 text-[#c98a4b]">
@@ -150,7 +152,7 @@ export default function MaritimeMap({
             </Marker>
           )}
 
-          {/* Detected Target Markers (Locked Colors, Sharp 2px Markers) */}
+          {/* Detected Target Markers */}
           {detections?.map((det) => {
             const cColor = getClassColor(det.class_name);
             return (

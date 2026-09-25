@@ -2,6 +2,7 @@ import uuid
 import time
 import cv2
 import numpy as np
+from starlette.concurrency import run_in_threadpool
 import asyncio
 from datetime import datetime, timezone
 from typing import Optional, Dict
@@ -100,7 +101,9 @@ def process_image_pipeline_sync(image_bytes, nav_data, force_mode=None):
 
     raw_detections, active_mode = detector_manager.detect(proc_bgr, force_mode=force_mode)
 
-    detection_results = []
+    # 5. Physics-Informed Filter & Geolocation Engine
+    detection_results: list[DetectionResult] = []
+    
     for idx, d in enumerate(raw_detections):
         det_id = f"DET-{idx+1:02d}"
         bbox = d["bbox"]
@@ -134,16 +137,7 @@ def process_image_pipeline_sync(image_bytes, nav_data, force_mode=None):
     proc_b64 = encode_image_to_base64(proc_bgr)
     annot_b64 = encode_image_to_base64(annotated)
 
-    return {
-        "active_mode": active_mode,
-        "w": w,
-        "h": h,
-        "orig_b64": orig_b64,
-        "proc_b64": proc_b64,
-        "annot_b64": annot_b64,
-        "detection_results": detection_results
-    }
-
+    return w, h, active_mode, detection_results, orig_b64, proc_b64, annot_b64
 
 @router.post("/analyze", response_model=AnalysisResponse)
 async def analyze_sonar_image(
@@ -154,37 +148,43 @@ async def analyze_sonar_image(
     altitude: float = Form(15.0),
     swath_width_m: float = Form(100.0),
     mission_name: str = Form("MoES-Survey-Alpha"),
-    force_mode: Optional[str] = Form(None),
-    db: AsyncSession = Depends(get_db)
+    force_mode: Optional[str] = Form(None)
 ):
+    """
+    Main Ingestion & Analysis Pipeline:
+    Ingestion -> Bilateral Despeckling + CLAHE -> YOLO / Feature Detection ->
+    Physics-Informed Acoustic Shadow Filter -> Geolocation -> Annotated Imagery.
+    """
     start_time = time.time()
     
+    # 1. Validate & Read File
     try:
         image_bytes = await file.read()
         if len(image_bytes) == 0:
             raise HTTPException(status_code=400, detail="Uploaded file is empty.")
+        raw_image = load_image_from_bytes(image_bytes)
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid image format: {str(e)}")
 
+    # 2. Navigation Context
     nav = NavigationMetadata(
-        vessel_lat=vessel_lat, vessel_lon=vessel_lon, heading=heading,
-        altitude=altitude, swath_width_m=swath_width_m, mission_name=mission_name
+        vessel_lat=vessel_lat,
+        vessel_lon=vessel_lon,
+        heading=heading,
+        altitude=altitude,
+        swath_width_m=swath_width_m,
+        mission_name=mission_name
     )
 
-    # Offload CPU bound operations to a thread
-    pipeline_res = await asyncio.to_thread(process_image_pipeline_sync, image_bytes, nav, force_mode)
-    
-    active_mode = pipeline_res["active_mode"]
-    w, h = pipeline_res["w"], pipeline_res["h"]
-    orig_b64 = pipeline_res["orig_b64"]
-    proc_b64 = pipeline_res["proc_b64"]
-    annot_b64 = pipeline_res["annot_b64"]
-    detection_results = pipeline_res["detection_results"]
+    # 3. Threadpool Pipeline
+    w, h, active_mode, detection_results, orig_b64, proc_b64, annot_b64 = await run_in_threadpool(
+        _run_pipeline, raw_image, nav, force_mode
+    )
 
     mission_id = f"MSN-{uuid.uuid4().hex[:8].upper()}"
-    timestamp_dt = datetime.now(timezone.utc)
-    timestamp_str = timestamp_dt.strftime("%Y-%m-%d %H:%M:%S UTC")
+    timestamp_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
+    # 7. Summary metrics
     summary = AnalysisSummary(
         total_detections=len(detection_results),
         critical_hazards=sum(1 for d in detection_results if d.hazard_level == "CRITICAL"),

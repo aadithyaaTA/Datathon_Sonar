@@ -4,8 +4,13 @@ import {
   Activity, CheckCircle2, XCircle, Sparkles, Compass, Waves 
 } from 'lucide-react';
 import { CLASS_COLORS, getClassColor } from '../services/colors';
+import { useSonarContext } from '../context/SonarContext';
 
-export default function DetectionInspector({ detection, vesselPos }) {
+export default function DetectionInspector() {
+  const { state } = useSonarContext();
+  const detection = state.selectedDetection;
+  const vesselPos = state.telemetry;
+
   if (!detection) {
     return (
       <div className="bg-[#1f1f1f] border border-white/08 rounded-[2px] p-6 flex flex-col items-center justify-center min-h-[350px] text-center">
@@ -45,7 +50,7 @@ export default function DetectionInspector({ detection, vesselPos }) {
 
   return (
     <div className="bg-[#1f1f1f] border border-white/08 rounded-[2px] p-4 flex flex-col gap-4">
-      {/* Header: Visibly larger and bolder */}
+      {/* Header */}
       <div className="flex items-center justify-between pb-3 border-b border-white/08">
         <div>
           <div className="flex items-center gap-2.5">
@@ -79,7 +84,6 @@ export default function DetectionInspector({ detection, vesselPos }) {
             <span className="text-[#c98a4b]">{Math.round(detection.bbox.width || 0)}×{Math.round(detection.bbox.height || 0)}px</span>
           </div>
 
-          {/* Annotated ROI Image with Measurement Brackets */}
           <div className="relative w-full flex items-center justify-center bg-black rounded-[2px] border border-white/10 p-1.5 overflow-hidden">
             {crop_image_url ? (
               <div className="relative inline-block">
@@ -89,17 +93,14 @@ export default function DetectionInspector({ detection, vesselPos }) {
                   className="max-h-28 object-contain rounded-[1px] bg-black"
                 />
 
-                {/* Highlight Peak Bracket Overlay */}
                 <div className="absolute top-1 left-1 border-t-2 border-l-2 border-[#c98a4b] px-1.5 py-0.5 bg-black/90 text-[10px] font-mono text-[#c98a4b] font-bold">
                   HL Peak: {physics_details.highlight_mean_intensity}
                 </div>
 
-                {/* Shadow Base Bracket Overlay */}
                 <div className="absolute bottom-1 right-1 border-b-2 border-r-2 border-[#7e8d9f] border-dashed px-1.5 py-0.5 bg-black/90 text-[10px] font-mono text-slate-300 font-bold">
                   Shadow Base: {physics_details.shadow_mean_intensity}
                 </div>
 
-                {/* Contrast Vector Badge */}
                 <div className="absolute top-1 right-1 bg-[#141414] border border-white/15 px-1.5 py-0.5 rounded-[2px] text-[10px] font-mono text-slate-200 font-bold">
                   Δ {physics_details.contrast_ratio}x
                 </div>
@@ -120,7 +121,6 @@ export default function DetectionInspector({ detection, vesselPos }) {
         {/* Right: Confidence Breakdown & Fusion Formula */}
         <div className="md:col-span-7 bg-[#242424] border border-white/08 rounded-[2px] p-3.5 flex flex-col justify-between">
           <div className="space-y-3">
-            {/* AI Confidence Bar */}
             <div>
               <div className="flex items-center justify-between text-[13.5px] font-mono mb-1">
                 <span className="text-slate-300 flex items-center gap-1.5 font-bold">
@@ -137,7 +137,6 @@ export default function DetectionInspector({ detection, vesselPos }) {
               </div>
             </div>
 
-            {/* Acoustic Physics Bar */}
             <div>
               <div className="flex items-center justify-between text-[13.5px] font-mono mb-1">
                 <span className="text-slate-300 flex items-center gap-1.5 font-bold">

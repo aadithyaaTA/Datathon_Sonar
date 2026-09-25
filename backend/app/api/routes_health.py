@@ -1,4 +1,10 @@
-import torch
+try:
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    torch = None
+    TORCH_AVAILABLE = False
+
 from fastapi import APIRouter
 from app.config import settings
 from app.models.schemas import HealthStatus
@@ -12,12 +18,13 @@ async def health_check():
     cuda_available = False
     device_name = "CPU"
     
-    try:
-        if torch.cuda.is_available():
-            cuda_available = True
-            device_name = f"CUDA: {torch.cuda.get_device_name(0)}"
-    except Exception:
-        pass
+    if TORCH_AVAILABLE and torch:
+        try:
+            if torch.cuda.is_available():
+                cuda_available = True
+                device_name = f"CUDA: {torch.cuda.get_device_name(0)}"
+        except Exception:
+            pass
 
     return HealthStatus(
         status="ONLINE",

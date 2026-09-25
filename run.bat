@@ -19,7 +19,7 @@ if not exist ".venv\Scripts\activate.bat" (
     python -m pip install --upgrade pip
     pip install -r backend\requirements.txt
 ) else (
-    echo [1/3] Python environment found (.venv).
+    echo [1/3] Python environment found .venv.
 )
 
 REM 2. Check frontend dependencies
